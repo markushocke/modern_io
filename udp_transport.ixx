@@ -1,19 +1,28 @@
 module;
 
 // System headers (sorted)
-#include <arpa/inet.h>    // For multicast/broadcast
 #include <cstdint>
 #include <cstring>
 #include <errno.h>
 #include <iostream>
 #include <fcntl.h>        // For nonblocking sockets
-#include <netdb.h>
 #include <stdexcept>
 #include <string>
-#include <sys/socket.h>
-#include <unistd.h>
 #include <utility>
 #include <vector>
+
+#ifdef _WIN32
+  #define NOMINMAX
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
+  #include <mstcpip.h> 
+  #pragma comment(lib, "ws2_32.lib") // Nur wenn nötig
+#else
+  #include <arpa/inet.h>    // For multicast/broadcast
+  #include <sys/socket.h>
+  #include <unistd.h>
+  #include <netdb.h>
+#endif
 
 export module net_io.udp_transport;
 
@@ -97,7 +106,19 @@ public:
             throw std::runtime_error("UDP socket() failed: " + std::string(std::strerror(err)));
 #endif
         }
-
+#if defined(_WIN32)
+        if (addr_local.ss_family == AF_INET6)
+        {
+            BOOL bFalse = FALSE;
+            ::setsockopt(
+                fd_,
+                IPPROTO_IPV6,
+                IPV6_V6ONLY,
+                reinterpret_cast<char*>(&bFalse),
+                sizeof(bFalse)
+            );
+        }
+#endif
         if (::bind(fd_, reinterpret_cast<sockaddr*>(&addr_local), len) != 0)
         {
 #if defined(_WIN32)
@@ -210,7 +231,6 @@ public:
             }
         }
 
-        // connect() auf Zieladresse
         if (::connect(fd_,
                       reinterpret_cast<sockaddr*>(&addr_remote),
                       len) < 0)
@@ -338,7 +358,7 @@ public:
     {
 #if defined(_WIN32)
         ::sendto(fd_, data, static_cast<int>(size), 0,
-                 reinterpret_cast<const sockaddr*>(&to_addr), to_len);
+                  reinterpret_cast<const sockaddr*>(&to_addr), to_len);
 #else
         ::sendto(fd_, data, size, 0,
                  reinterpret_cast<const sockaddr*>(&to_addr), to_len);

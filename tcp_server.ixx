@@ -5,13 +5,21 @@ module;
 #include <cstring>
 #include <exception>
 #include <fcntl.h>        // For nonblocking sockets
-#include <netdb.h>
 #include <stdexcept>
 #include <string>
-#include <sys/socket.h>
-#include <unistd.h>
 #include <utility>
 #include <vector>
+
+#ifdef _WIN32
+  #define NOMINMAX
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
+  #pragma comment(lib, "ws2_32.lib") // Nur wenn nötig
+#else
+  #include <netdb.h>
+  #include <sys/socket.h>
+  #include <unistd.h>
+#endif
 
 export module net_io.tcp_server;
 

@@ -20,6 +20,7 @@ module;
 
 // Platform-specific includes for sockaddr_storage and socklen_t
 #if defined(_WIN32)
+  #define NOMINMAX
   #include <winsock2.h>
   #include <ws2tcpip.h>
 #else
@@ -30,10 +31,17 @@ module;
 // ---------------------------
 // 2) Module interface
 // ---------------------------
-export module net_io_adapters;
 
+export module net_io_adapters;
 import modern_io;   // provides modern_io::OutputStream/InputStream
 import net_io;      // provides net_io::Transportable, net_io::TcpClient, etc.
+
+// This can be removed when msvc better supports umbrella imports
+import net_io.tcp_endpoint;
+import net_io.tcp_client;
+import net_io.tcp_server;
+import net_io.udp_endpoint;
+import net_io.udp_transport;
 import net_io_concepts; // <--- hinzugefügt
 
 export namespace net_io_adapters

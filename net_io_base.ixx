@@ -3,6 +3,7 @@ module;
 // System headers (sorted)
 #if defined(_WIN32)
   #pragma comment(lib, "Ws2_32.lib")
+  #define NOMINMAX
   #include <winsock2.h>
   #include <ws2tcpip.h>
 #else
@@ -33,7 +34,7 @@ namespace detail {
   inline std::once_flag wsa_flag;
 
   // Ensure WSAStartup is called once for Windows sockets
-  inline void ensure_wsa()
+  export inline void ensure_wsa()
   {
     std::call_once(wsa_flag, []() {
       WSADATA wsa;

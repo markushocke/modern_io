@@ -2,6 +2,13 @@ import modern_io;
 import net_io;
 import net_io_adapters;
 
+// This can be removed when msvc better supports umbrella imports
+import net_io.tcp_endpoint;
+import net_io.tcp_client;
+import net_io.tcp_server;
+import net_io.udp_endpoint;
+import net_io.udp_transport;
+
 #include <iostream>
 #include <syncstream>
 #include <thread>
@@ -13,8 +20,9 @@ using namespace modern_io;
 using namespace net_io;
 using namespace net_io_adapters;
 
-constexpr uint16_t PORT = 9050;
-constexpr std::string address = "127.0.0.1";
+constexpr uint16_t TCP_PORT = 9050;
+constexpr uint16_t UDP_PORT = 9050;
+std::string address = "127.0.0.1";
 
 // TCP server: receives a message, replies, then exits
 void tcp_server()
@@ -38,7 +46,7 @@ void tcp_server()
         exec,
         std::move(tcp_handler),
         running,
-        TcpEndpoint{address, PORT}
+        TcpEndpoint{address, TCP_PORT}
     );
 
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -48,7 +56,7 @@ void tcp_server()
 // UDP server: receives a datagram, replies, then exits
 void udp_server()
 {
-    UdpEndpoint ep{address, PORT, true, PORT};
+    UdpEndpoint ep{address, UDP_PORT, true, UDP_PORT};
     auto shared_stream = make_shared_stream_for_server(ep);
     DataInputStream<decltype(shared_stream)> in(shared_stream, std::endian::big);
     DataOutputStream<decltype(shared_stream)> out(shared_stream, std::endian::big);
@@ -68,7 +76,7 @@ int main()
         std::thread srv(tcp_server);
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        TcpEndpoint ep({address, PORT});
+        TcpEndpoint ep({address, TCP_PORT});
         auto tcp_stream = make_shared_stream(ep);
 
         DataOutputStream<decltype(tcp_stream)> out(tcp_stream, std::endian::big);
@@ -87,7 +95,7 @@ int main()
         std::thread srv(udp_server);
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        UdpEndpoint client_ep(address, PORT);
+        UdpEndpoint client_ep(address, UDP_PORT);
         auto udp_stream = make_shared_stream(client_ep);
 
         DataOutputStream<decltype(udp_stream)> out(udp_stream, std::endian::big);

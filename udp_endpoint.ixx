@@ -5,7 +5,14 @@ module;
 #include <cstring>
 #include <utility>
 #include <cstdint>
-#include <netdb.h>
+#ifdef _WIN32
+  #define NOMINMAX
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
+  #pragma comment(lib, "ws2_32.lib") // Nur wenn nötig
+#else
+  #include <netdb.h>
+#endif
 
 export module net_io.udp_endpoint;
 import net_io_base;

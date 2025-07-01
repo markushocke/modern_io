@@ -238,7 +238,7 @@ SOFTWARE.
 
 ## Authors
 
-- [Your Name](https://github.com/your-profile)
+- [Markus Hocke](https://github.com/markushocke)
 - Contributors welcome!
 
 ---

@@ -167,21 +167,26 @@ void tcp_server()
     std::atomic<bool> running{true};
     ThreadExecutor exec;
 
-    auto handler = [](auto&& stream) {
-        DataInputStream in(std::move(stream), std::endian::big);
-        DataOutputStream out(std::move(stream), std::endian::big);
+    auto handler = [](auto&& shared_stream) {
+        DataInputStream<decltype(shared_stream)> in(std::move(shared_stream), std::endian::big);
+        DataOutputStream<decltype(shared_stream)> out(std::move(shared_stream), std::endian::big);
+
         std::string msg = in.read_string();
+        std::osyncstream(std::cout) << "[TCP-Server] Received: " << msg << std::endl;
+
         out.write_string("Echo: " + msg);
         out.flush();
     };
 
-    run_server_with_executor(
+    run_tcp_server(
         exec,
-        tcp_stream_builder,
-        handler,
+        std::move(handler),
         running,
         TcpEndpoint{address, PORT}
     );
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    running = false;
 }
 ```
 
@@ -238,6 +243,14 @@ SOFTWARE.
 
 ## Authors
 
+- [Markus Hocke](https://github.com/markushocke)
+- Contributors welcome!
+
+---
+
+## Support
+
+For questions, bug reports, or contributions, please open an issue or pull request on GitHub.
 - [Markus Hocke](https://github.com/markushocke)
 - Contributors welcome!
 

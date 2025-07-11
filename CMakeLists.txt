@@ -100,3 +100,8 @@ add_module_target(net_io_adapters)
 add_executable(IOApp ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 target_link_libraries(IOApp PRIVATE net_io_adapters)
 target_compile_features(IOApp PRIVATE cxx_std_20)
+
+# Compile-Check: Dummy-Target für alle Module
+add_executable(module_compile_check EXCLUDE_FROM_ALL main.cpp)
+target_link_libraries(module_compile_check PRIVATE net_io_adapters)
+target_compile_features(module_compile_check PRIVATE cxx_std_20)

@@ -21,11 +21,21 @@ module;
 #include <mutex>
 #include <optional>
 
+#ifndef _MSC_VER
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+#endif
+
 export module net_io_base;
+
+#ifdef _MSC_VER
 import <stdexcept>;
 import <string>;
 import <utility>;
 import <vector>;
+#endif
 
 // --- Platform-specific helpers ---
 #if defined(_WIN32)

@@ -1,8 +1,19 @@
 // modern_io_buffered.ixx
 module;
 
+#ifndef _MSC_VER
+#include <vector>
+#include <cstring>
+#include <span>
+#endif
+
 export module modern_io:buffered;
 import :concepts;
+
+#ifdef _MSC_VER
+import <vector>;
+import <cstring>;
+#endif
 namespace modern_io
 {
 

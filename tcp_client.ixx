@@ -13,8 +13,20 @@ module;
   #include <unistd.h>
 #endif
 
+#ifndef _MSC_VER
+#include <cstdint>
+#include <cstring>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+#include <iostream>
+#include <optional>
+#endif
+
 export module net_io.tcp_client;
 
+#ifdef _MSC_VER
 import <cstdint>;
 import <cstring>;
 import <stdexcept>;
@@ -23,6 +35,7 @@ import <utility>;
 import <vector>;
 import <iostream>;
 import <optional>;
+#endif
 
 // Module imports (sorted)
 import net_io_base;

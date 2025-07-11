@@ -1,6 +1,27 @@
 // modern_io_concepts.ixx
 module;
 
+#ifndef _MSC_VER
+#include <cstddef>
+#include <concepts>
+#include <string>
+#include <vector>
+#include <stdexcept>
+#include <fstream>
+#include <cstdint>
+#include <cstring>
+#include <span>
+#include <type_traits>
+#include <utility>
+#include <limits>
+#include <bit>
+#include <future>
+#endif
+
+
+export module modern_io:concepts;
+
+#ifdef _MSC_VER
 import <cstddef>;
 import <concepts>;
 import <string>;
@@ -15,8 +36,8 @@ import <utility>;
 import <limits>;
 import <bit>;
 import <future>;
+#endif
 
-export module modern_io:concepts;
 namespace modern_io
 {
 

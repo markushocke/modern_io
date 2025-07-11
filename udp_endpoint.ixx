@@ -1,10 +1,12 @@
 module;
-
+#ifndef _MSC_VER
 #include <string>
 #include <stdexcept>
 #include <cstring>
 #include <utility>
 #include <cstdint>
+#endif
+
 #ifdef _WIN32
   #define NOMINMAX
   #include <winsock2.h>
@@ -17,6 +19,14 @@ module;
 export module net_io.udp_endpoint;
 import net_io_base;
 export import net_io_base; // sock_t und invalid_socket sichtbar machen
+
+#ifdef _MSC_VER
+import <string>;
+import <stdexcept>;
+import <cstring>;
+import <utility>;
+import <cstdint>;
+#endif
 
 export namespace net_io
 {

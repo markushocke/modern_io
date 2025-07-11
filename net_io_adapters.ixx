@@ -1,6 +1,3 @@
-// ---------------------------
-// 1) global module fragment
-// ---------------------------
 module;
 
 #include <optional>
@@ -17,12 +14,30 @@ module;
   #include <netinet/in.h>
 #endif
 
-// ---------------------------
-// 2) Module interface
-// ---------------------------
+#ifndef _MSC_VER
+#include <cstddef>
+#include <concepts>
+#include <string>
+#include <vector>
+#include <stdexcept>
+#include <fstream>
+#include <cstdint>
+#include <cstring>
+#include <span>
+#include <type_traits>
+#include <utility>
+#include <limits>
+#include <bit>
+#include <iostream>
+#include <memory>
+#include <thread>
+#endif
+
 
 export module net_io_adapters;
 
+
+#ifdef _MSC_VER
 import <cstddef>;
 import <concepts>;
 import <string>;
@@ -37,6 +52,7 @@ import <utility>;
 import <limits>;
 import <bit>;
 import <iostream>;
+#endif
 
 import modern_io;   // provides modern_io::OutputStream/InputStream
 import net_io;      // provides net_io::Transportable, net_io::TcpClient, etc.

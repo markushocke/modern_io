@@ -1,8 +1,27 @@
 // modern_io_data.ixx
 module;
 
+#ifndef _MSC_VER
+#include <vector>
+#include <cstring>
+#include <limits>
+#include <bit>
+#include <span>
+#include <stdint.h>
+#include <string>
+#include <stdexcept>
+#endif
+
 export module modern_io:data;
 import :concepts;
+
+#ifdef _MSC_VER
+import <vector>;
+import <cstring>;
+import <limits>;
+import <bit>;
+#endif
+
 namespace modern_io
 {
 

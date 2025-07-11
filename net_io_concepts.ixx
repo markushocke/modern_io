@@ -1,10 +1,18 @@
 module;
 
+#ifndef _MSC_VER
+#include <concepts>
+#include <cstddef>
+#include <utility>
+#endif
+
+export module net_io_concepts;
+
+#ifdef _MSC_VER
 import <concepts>;
 import <cstddef>;
 import <utility>;
-
-export module net_io_concepts;
+#endif
 
 namespace net_io_concepts
 {

@@ -1,8 +1,19 @@
 module;
 
+#ifndef _MSC_VER
+#include <ostream>
+#include <istream>
+#include <span>
+#endif
+
 export module modern_io:iostream;
 import :concepts;
 
+#ifdef _MSC_VER
+import <ostream>;
+import <istream>;
+import <span>;
+#endif
 
 namespace modern_io
 {

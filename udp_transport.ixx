@@ -1,15 +1,16 @@
 module;
 
-// System headers (sorted)
+#ifndef _MSC_VER
 #include <cstdint>
 #include <cstring>
 #include <errno.h>
 #include <iostream>
-#include <fcntl.h>        // For nonblocking sockets
+#include <fcntl.h>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
+#endif
 
 #ifdef _WIN32
   #define NOMINMAX
@@ -25,6 +26,18 @@ module;
 #endif
 
 export module net_io.udp_transport;
+
+#ifdef _MSC_VER
+import <cstdint>;
+import <cstring>;
+import <errno.h>;
+import <iostream>;
+import <fcntl.h>;
+import <stdexcept>;
+import <string>;
+import <utility>;
+import <vector>;
+#endif
 
 // Module imports (sorted)
 import net_io_base;

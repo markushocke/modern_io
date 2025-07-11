@@ -1,8 +1,25 @@
 // modern_io_file.ixx
 module;
 
+#ifndef _MSC_VER
+#include <fstream>
+#include <stdexcept>
+#include <string>
+#include <span>
+#include <vector>
+#endif
+
 export module modern_io:file;
 import :concepts;
+
+#ifdef _MSC_VER
+import <fstream>;
+import <stdexcept>;
+import <string>;
+import <span>;
+import <vector>;
+#endif
+
 namespace modern_io
 {
 

@@ -21,7 +21,20 @@ module;
   #include <unistd.h>
 #endif
 
+#ifndef _MSC_VER
+#include <vector>
+#include <string>
+#include <stdexcept>
+#endif
+
+
 export module net_io.tcp_server;
+
+#ifdef _MSC_VER
+import <vector>;
+import <string>;
+import <stdexcept>;
+#endif
 
 // Module imports (sorted)
 import net_io_base;

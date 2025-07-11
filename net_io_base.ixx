@@ -20,13 +20,12 @@ module;
 // Standard library headers (sorted)
 #include <mutex>
 #include <optional>
-#include <stdexcept>
-#include <string>
-#include <system_error>
-#include <utility>
-#include <vector>
 
 export module net_io_base;
+import <stdexcept>;
+import <string>;
+import <utility>;
+import <vector>;
 
 // --- Platform-specific helpers ---
 #if defined(_WIN32)

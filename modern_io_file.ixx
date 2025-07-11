@@ -1,21 +1,8 @@
 // modern_io_file.ixx
 module;
-#include <cstddef>
-#include <concepts>
-#include <string>
-#include <vector>
-#include <stdexcept>
-#include <fstream>
-#include <stdint.h>
-#include <cstdint>
-#include <cstring>
-#include <span>
-#include <type_traits>
-#include <utility>
-#include <limits>
-#include <bit>
 
 export module modern_io:file;
+import :concepts;
 namespace modern_io
 {
 
@@ -160,5 +147,6 @@ public:
 private:
     std::ifstream in_;
 };
-
+static_assert(InputStream<FileInputStream>);
+static_assert(OutputStream<FileOutputStream>);
 } // namespace modern_io

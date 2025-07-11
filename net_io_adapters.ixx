@@ -2,21 +2,10 @@
 // 1) global module fragment
 // ---------------------------
 module;
-#include <cstddef>
-#include <utility>
-#include <vector>
-#include <cstdint>
-#include <cstring>
-#include <span>
-#include <mutex>
+
 #include <optional>
-#include <stdexcept>
-#include <memory>
-#include <concepts>
+#include <mutex>
 #include <functional>
-#include <thread>
-#include <atomic>
-#include <iostream>
 
 // Platform-specific includes for sockaddr_storage and socklen_t
 #if defined(_WIN32)
@@ -33,6 +22,22 @@ module;
 // ---------------------------
 
 export module net_io_adapters;
+
+import <cstddef>;
+import <concepts>;
+import <string>;
+import <vector>;
+import <stdexcept>;
+import <fstream>;
+import <cstdint>;
+import <cstring>;
+import <span>;
+import <type_traits>;
+import <utility>;
+import <limits>;
+import <bit>;
+import <iostream>;
+
 import modern_io;   // provides modern_io::OutputStream/InputStream
 import net_io;      // provides net_io::Transportable, net_io::TcpClient, etc.
 

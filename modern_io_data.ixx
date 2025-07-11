@@ -1,19 +1,5 @@
 // modern_io_data.ixx
 module;
-#include <cstddef>
-#include <concepts>
-#include <string>
-#include <vector>
-#include <stdexcept>
-#include <fstream>
-#include <stdint.h>
-#include <cstdint>
-#include <cstring>
-#include <span>
-#include <type_traits>
-#include <utility>
-#include <limits>
-#include <bit>
 
 export module modern_io:data;
 import :concepts;
@@ -281,5 +267,4 @@ private:
     S             source_;
     std::endian   order_;
 };
-
 } // namespace modern_io

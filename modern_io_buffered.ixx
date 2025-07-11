@@ -1,19 +1,5 @@
 // modern_io_buffered.ixx
 module;
-#include <cstddef>
-#include <concepts>
-#include <string>
-#include <vector>
-#include <stdexcept>
-#include <fstream>
-#include <stdint.h>
-#include <cstdint>
-#include <cstring>
-#include <span>
-#include <type_traits>
-#include <utility>
-#include <limits>
-#include <bit>
 
 export module modern_io:buffered;
 import :concepts;
@@ -217,6 +203,4 @@ private:
     std::size_t        pos_;
     std::size_t        end_;
 };
-
-
 } // namespace modern_io

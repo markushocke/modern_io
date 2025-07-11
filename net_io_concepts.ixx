@@ -1,8 +1,8 @@
 module;
 
-#include <concepts>
-#include <cstddef>
-#include <utility>
+import <concepts>;
+import <cstddef>;
+import <utility>;
 
 export module net_io_concepts;
 

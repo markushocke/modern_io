@@ -56,6 +56,7 @@ target_sources(modern_io
       ${CMAKE_CURRENT_SOURCE_DIR}/modern_io_file.ixx
       ${CMAKE_CURRENT_SOURCE_DIR}/modern_io_data.ixx
       ${CMAKE_CURRENT_SOURCE_DIR}/modern_io_buffered.ixx
+      ${CMAKE_CURRENT_SOURCE_DIR}/modern_io_iostream.ixx
 )
 target_compile_features(modern_io PUBLIC cxx_std_20)
 add_module_target(modern_io)

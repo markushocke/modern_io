@@ -1,14 +1,6 @@
 module;
 
-#include <cstdint>
-#include <cstring>
 #include <errno.h>
-#include <stdexcept>
-#include <string>
-#include <utility>
-#include <vector>
-#include <iostream>
-#include <optional>
 
 #ifdef _WIN32
   #define NOMINMAX
@@ -22,6 +14,15 @@ module;
 #endif
 
 export module net_io.tcp_client;
+
+import <cstdint>;
+import <cstring>;
+import <stdexcept>;
+import <string>;
+import <utility>;
+import <vector>;
+import <iostream>;
+import <optional>;
 
 // Module imports (sorted)
 import net_io_base;

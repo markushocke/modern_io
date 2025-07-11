@@ -30,7 +30,6 @@ export module net_io.udp_transport;
 #ifdef _MSC_VER
 import <cstdint>;
 import <cstring>;
-import <errno.h>;
 import <iostream>;
 import <fcntl.h>;
 import <stdexcept>;

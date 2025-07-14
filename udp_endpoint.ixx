@@ -11,7 +11,7 @@ module;
   #define NOMINMAX
   #include <winsock2.h>
   #include <ws2tcpip.h>
-  #pragma comment(lib, "ws2_32.lib") // Nur wenn nötig
+  #pragma comment(lib, "ws2_32.lib") // Only needed for static linking on Windows.
 #else
   #include <netdb.h>
 #endif

@@ -58,7 +58,8 @@ export namespace net_io
     explicit TcpServer(const TcpEndpoint& ep)
       : endpoint_(ep)
     {
-      // Konstruktor macht nichts mehr außer speichern
+        if (endpoint_.address.empty())
+            throw std::invalid_argument("TcpServer: endpoint address empty");
     }
 
     /// Start and bind to the stored endpoint
@@ -237,7 +238,7 @@ export namespace net_io
   private:
     std::vector<sock_t> listen_fds_;
     int accept_timeout_ms_ = -1; // -1 = no timeout
-    TcpEndpoint endpoint_; // neu: speichert den Endpoint
+    TcpEndpoint endpoint_; ///< The endpoint to bind to
   };
   
   //static assert for acceptable concept

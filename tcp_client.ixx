@@ -6,7 +6,7 @@ module;
   #define NOMINMAX
   #include <winsock2.h>
   #include <ws2tcpip.h>
-  #pragma comment(lib, "ws2_32.lib") // Nur wenn nötig
+  #pragma comment(lib, "ws2_32.lib")
 #else
   #include <netdb.h>
   #include <sys/socket.h>
@@ -48,36 +48,66 @@ export namespace net_io
   /**
    * @brief TCP client for connecting to remote endpoints.
    *
-   * Manages a TCP socket. Not copyable, but movable.
-   * Automatically closes the socket in the destructor.
+   * This class manages a TCP socket connection to a remote endpoint.
+   * The class is not copyable, but is movable. The socket is automatically
+   * closed in the destructor to ensure resource safety.
+   *
+   * Example usage:
+   * @code
+   * net_io::TcpEndpoint ep("127.0.0.1", 8080);
+   * net_io::TcpClient client(ep);
+   * client.open();
+   * client.write("hello", 5);
+   * char buf[128];
+   * std::size_t n = client.read(buf, sizeof(buf));
+   * client.close();
+   * @endcode
    */
   class TcpClient
   {
   public:
+    /**
+     * @brief Construct a TcpClient from an existing socket handle.
+     * @param fd The socket handle (must be a valid TCP socket).
+     */
     explicit TcpClient(sock_t fd)
       : fd_(fd), ep_(std::nullopt)
     {}
 
-    /// Konstruktor mit Endpoint (verbindet noch nicht)
+    /**
+     * @brief Construct a TcpClient with a TCP endpoint (does not connect yet).
+     * @param ep The TCP endpoint to connect to.
+     */
     explicit TcpClient(const TcpEndpoint& ep)
       : ep_(ep)
     {}
 
-    /// Not copyable
+    // Not copyable: copying a socket client is not allowed.
     TcpClient(const TcpClient&) = delete;
     TcpClient& operator=(const TcpClient&) = delete;
 
-    /// Move constructor
+    /**
+     * @brief Move constructor.
+     *
+     * Transfers ownership of the socket and endpoint from another TcpClient.
+     * The moved-from object is left in a valid but unspecified state.
+     */
     TcpClient(TcpClient&& other) noexcept
       : fd_(other.fd_), ep_(std::move(other.ep_))
     {
       other.fd_ = invalid_socket;
     }
 
-    /// Move assignment
+    /**
+     * @brief Move assignment operator.
+     *
+     * Transfers ownership of the socket and endpoint from another TcpClient.
+     * The moved-from object is left in a valid but unspecified state.
+     */
     TcpClient& operator=(TcpClient&& other) noexcept
     {
-      if (this != &other) {
+      if (this != &other)
+      {
         close();
         fd_ = other.fd_;
         ep_ = std::move(other.ep_);
@@ -86,12 +116,20 @@ export namespace net_io
       return *this;
     }
 
-    /// Explicit destructor for resource cleanup
-    ~TcpClient() { close(); }
+    /**
+     * @brief Destructor. Closes the socket if it is open.
+     */
+    ~TcpClient()
+    {
+      close();
+    }
 
     /**
      * @brief Open a connection to the stored TCP endpoint.
-     * @throws SocketException on error
+     * @throws SocketException if the endpoint is not set or if the connection fails.
+     *
+     * This method creates a socket and connects to the endpoint specified in the constructor.
+     * On failure, the socket is closed and an exception is thrown.
      */
     void open()
     {
@@ -105,7 +143,8 @@ export namespace net_io
       socklen_t len = sizeof(addr);
 
       fd_ = ::socket(addr.ss_family, SOCK_STREAM, 0);
-      if (fd_ == invalid_socket) {
+      if (fd_ == invalid_socket)
+      {
         std::cerr << "[TcpClient] socket() failed, fd_=" << fd_ << std::endl;
         throw SocketException("socket() failed", errno);
       }
@@ -132,9 +171,12 @@ export namespace net_io
 
     /**
      * @brief Read data from the socket.
-     * @param data Destination buffer
-     * @param size Number of bytes
-     * @return Number of bytes read
+     * @param data Pointer to the destination buffer.
+     * @param size Number of bytes to read.
+     * @return Number of bytes actually read, or 0 on error.
+     *
+     * This method reads up to 'size' bytes from the socket into 'data'.
+     * Returns the number of bytes read, or 0 if an error occurs.
      */
     std::size_t read(char* data, std::size_t size) noexcept
     {
@@ -151,13 +193,21 @@ export namespace net_io
 
     /**
      * @brief Write data to the socket.
-     * @param data Source buffer
-     * @param size Number of bytes
-     * @throws SocketException on error
+     * @param data Pointer to the source buffer.
+     * @param size Number of bytes to write.
+     * @throws SocketException if the socket is not open or if the write fails.
+     *
+     * Writes data to the socket.
+     * Throws a SocketException if the socket is not open or if the write fails.
+     * Example:
+     * @code
+     * client.write("hello", 5);
+     * @endcode
      */
     void write(const char* data, std::size_t size)
     {
-      if (fd_ == invalid_socket) {
+      if (fd_ == invalid_socket)
+      {
         std::cerr << "[TcpClient] write() failed: fd_ is invalid!" << std::endl;
         throw SocketException("write() failed: socket not open", 0);
       }
@@ -174,10 +224,20 @@ export namespace net_io
 
     /**
      * @brief Close the connection (idempotent).
+     *
+     * Closes the socket if it is open. This operation is idempotent:
+     * calling close() multiple times is safe and has no effect after the first call.
+     * The socket handle is set to invalid_socket after closing.
+     *
+     * Example:
+     * @code
+     * client.close();
+     * @endcode
      */
     void close() noexcept
     {
-      if (fd_ != invalid_socket) {
+      if (fd_ != invalid_socket)
+      {
 #if defined(_WIN32)
         ::closesocket(fd_);
 #else
@@ -189,31 +249,80 @@ export namespace net_io
 
     /**
      * @brief Returns whether the socket is open.
+     *
+     * @return true if the socket is open and valid, false otherwise.
+     *
+     * Example:
+     * @code
+     * if (client.is_open()) { ... }
+     * @endcode
      */
-    bool is_open() const noexcept { return fd_ != invalid_socket; }
+    bool is_open() const noexcept
+    {
+      return fd_ != invalid_socket;
+    }
 
     /**
      * @brief Returns the native socket handle.
+     * @return The socket handle (platform-dependent type).
      */
-    sock_t native_handle() const noexcept { return fd_; }
+    sock_t native_handle() const noexcept
+    {
+      return fd_;
+    }
 
-    /// Set the socket to nonblocking mode
+    /**
+     * @brief Set the socket to nonblocking mode.
+     * @param enable True to enable nonblocking mode, false to disable.
+     *
+     * Example:
+     * @code
+     * client.set_nonblocking(true);
+     * @endcode
+     */
     void set_nonblocking(bool enable)
     {
       set_socket_option(fd_, SocketOption::NonBlocking, enable ? 1 : 0);
     }
 
-    /// Set read/write timeout in milliseconds
+    /**
+     * @brief Set the read timeout in milliseconds.
+     * @param ms Timeout in milliseconds.
+     *
+     * Example:
+     * @code
+     * client.set_read_timeout(1000); // 1 second
+     * @endcode
+     */
     void set_read_timeout(int ms)
     {
       set_socket_option(fd_, SocketOption::ReadTimeoutMs, ms);
     }
+
+    /**
+     * @brief Set the write timeout in milliseconds.
+     * @param ms Timeout in milliseconds.
+     *
+     * Example:
+     * @code
+     * client.set_write_timeout(1000); // 1 second
+     * @endcode
+     */
     void set_write_timeout(int ms)
     {
       set_socket_option(fd_, SocketOption::WriteTimeoutMs, ms);
     }
 
-    /// Set an arbitrary socket option
+    /**
+     * @brief Set an arbitrary socket option.
+     * @param opt The socket option to set.
+     * @param value The value to set for the option.
+     *
+     * Example:
+     * @code
+     * client.set_option(SocketOption::KeepAlive, 1);
+     * @endcode
+     */
     void set_option(SocketOption opt, int value)
     {
       set_socket_option(fd_, opt, value);
@@ -224,10 +333,10 @@ export namespace net_io
     // sockaddr_storage remote_address() const;
 
   private:
-    sock_t fd_{ invalid_socket };
-    std::optional<TcpEndpoint> ep_;
-
-
+    sock_t fd_{ invalid_socket }; ///< The socket handle.
+    std::optional<TcpEndpoint> ep_; ///< The endpoint to connect to (if any).
   };
-  static_assert(net_io_concepts::Transportable<net_io::TcpClient>, "TcpClient does not implement Transportable cocnept!");
+
+  // Compile-time check: ensure TcpClient satisfies the Transportable concept.
+  static_assert(net_io_concepts::Transportable<net_io::TcpClient>, "TcpClient does not implement Transportable concept!");
 }

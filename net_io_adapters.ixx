@@ -54,50 +54,97 @@ import <bit>;
 import <iostream>;
 #endif
 
-import modern_io;   // provides modern_io::OutputStream/InputStream
-import net_io;      // provides net_io::Transportable, net_io::TcpClient, etc.
+import modern_io;   // Provides modern_io::OutputStream and modern_io::InputStream interfaces.
+import net_io;      // Provides net_io::Transportable, net_io::TcpClient, and other network primitives.
 
-// This can be removed when msvc better supports umbrella imports
+// The following imports are required for MSVC due to incomplete umbrella import support.
 import net_io.tcp_endpoint;
 import net_io.tcp_client;
 import net_io.tcp_server;
 import net_io.udp_endpoint;
 import net_io.udp_transport;
-import net_io_concepts; // <--- hinzugefügt
+import net_io_concepts; // Imports network transport concepts for constraints.
 
 export namespace net_io_adapters
 {
 
-    // Adapter: turns any Writable transport into a modern_io::OutputStream
-    template<net_io_concepts::Writable T> // <--- angepasst
+    /**
+     * @brief Adapter that turns any Writable transport into a modern_io::OutputStream.
+     *
+     * This class allows you to use any transport that satisfies the Writable concept
+     * as an OutputStream in the modern_io framework.
+     *
+     * Example:
+     * @code
+     * net_io::TcpClient client(endpoint);
+     * client.open();
+     * TransportSink sink(client);
+     * sink.write("hello", 5);
+     * @endcode
+     */
+    template<net_io_concepts::Writable T>
     class TransportSink
     {
     public:
+        /**
+         * @brief Constructs a TransportSink from a writable transport.
+         * @param t Reference to the writable transport.
+         */
         explicit TransportSink(T& t) noexcept
             : t_(t)
         {
         }
 
+        /**
+         * @brief Writes data to the underlying transport.
+         * @param data Pointer to the data to write.
+         * @param size Number of bytes to write.
+         */
         void write(const char* data, std::size_t size)
         {
             t_.write(data, size);
         }
 
+        /**
+         * @brief Writes a span of bytes to the underlying transport.
+         * @param data Span of bytes to write.
+         */
         void write(std::span<const std::byte> data)
         {
             write(reinterpret_cast<const char*>(data.data()), data.size());
         }
+
+        /**
+         * @brief Writes a span of chars to the underlying transport.
+         * @param data Span of chars to write.
+         */
         void write(std::span<const char> data)
         {
             write(data.data(), data.size());
         }
 
+        /**
+         * @brief Flushes the output stream.
+         *
+         * For socket-based transports, this is typically a no-op because there is no userland buffering.
+         */
         void flush() noexcept
         {
-            // No userland buffering for sockets
+            // No userland buffering for sockets.
         }
 
-        // Optional: write_to passthrough, if T supports it
+        /**
+         * @brief Optionally forwards write_to if the underlying transport supports it.
+         *
+         * This allows sending data to a specific address, for example in UDP transports.
+         * The method is only available if T provides a compatible write_to method.
+         *
+         * Example:
+         * @code
+         * sockaddr_storage addr = ...;
+         * sink.write_to("data", 4, addr, sizeof(addr));
+         * @endcode
+         */
         template<typename U = T, typename... Args>
         auto write_to(Args&&... args)
             -> decltype(std::declval<U&>().write_to(std::forward<Args>(args)...))
@@ -106,39 +153,89 @@ export namespace net_io_adapters
         }
 
     private:
-        T& t_;
+        T& t_; ///< Reference to the underlying writable transport.
     };
 
-    // Adapter: turns any Readable transport into a modern_io::InputStream
-    template<net_io_concepts::Readable T> // <--- angepasst
+    /**
+     * @brief Adapter that turns any Readable transport into a modern_io::InputStream.
+     *
+     * This class allows you to use any transport that satisfies the Readable concept
+     * as an InputStream in the modern_io framework.
+     *
+     * Example:
+     * @code
+     * net_io::TcpClient client(endpoint);
+     * client.open();
+     * TransportSource source(client);
+     * char buf[128];
+     * size_t n = source.read(buf, sizeof(buf));
+     * @endcode
+     */
+    template<net_io_concepts::Readable T>
     class TransportSource
     {
     public:
+        /**
+         * @brief Constructs a TransportSource from a readable transport.
+         * @param t Reference to the readable transport.
+         */
         explicit TransportSource(T& t) noexcept
             : t_(t)
         {
         }
 
+        /**
+         * @brief Reads data from the underlying transport.
+         * @param data Pointer to the buffer to fill.
+         * @param size Maximum number of bytes to read.
+         * @return Number of bytes actually read.
+         */
         std::size_t read(char* data, std::size_t size)
         {
             return t_.read(data, size);
         }
 
+        /**
+         * @brief Reads data into a span of bytes.
+         * @param data Span of bytes to fill.
+         * @return Number of bytes actually read.
+         */
         std::size_t read(std::span<std::byte> data)
         {
             return read(reinterpret_cast<char*>(data.data()), data.size());
         }
+
+        /**
+         * @brief Reads data into a span of chars.
+         * @param data Span of chars to fill.
+         * @return Number of bytes actually read.
+         */
         std::size_t read(std::span<char> data)
         {
             return read(data.data(), data.size());
         }
 
+        /**
+         * @brief Checks for end-of-file (EOF) condition.
+         * @return Always returns false for sockets, as EOF is not typically meaningful.
+         */
         bool eof() const noexcept
         {
             return false;
         }
 
-        // Optional: read with sender address, if T supports it
+        /**
+         * @brief Optionally reads data and obtains the sender address, if supported.
+         *
+         * This method is only enabled if the underlying transport provides a compatible
+         * read method that accepts sender address parameters (e.g., UDP).
+         *
+         * @param data Buffer to fill.
+         * @param size Maximum number of bytes to read.
+         * @param from Pointer to sockaddr_storage to receive sender address.
+         * @param fromlen Pointer to socklen_t to receive address length.
+         * @return Number of bytes actually read, or 0 if not supported.
+         */
         std::size_t read(char* data, std::size_t size, sockaddr_storage* from, socklen_t* fromlen)
         {
             if constexpr (requires { t_.read(data, size, from, fromlen); }) 
@@ -147,17 +244,20 @@ export namespace net_io_adapters
             } 
             else 
             {
-                // Fallback: not supported
+                // Fallback: not supported.
                 return 0;
             }
         }
 
-        // Access to the underlying object (e.g. for native_handle)
+        /**
+         * @brief Provides access to the underlying transport object.
+         * @return Reference to the underlying transport.
+         */
         T& underlying() noexcept { return t_; }
         const T& underlying() const noexcept { return t_; }
 
     private:
-        T& t_;
+        T& t_; ///< Reference to the underlying readable transport.
     };
 
     // Adapter for UDP datagram output, buffers until flush
@@ -165,24 +265,74 @@ export namespace net_io_adapters
     class DatagramSink
     {
     public:
+        /**
+         * @brief Constructs a DatagramSink that adapts a writable transport for datagram (UDP) output.
+         *
+         * This adapter buffers outgoing data until flush() is called, at which point the entire buffer
+         * is sent as a single datagram. This is useful for protocols where each message must be sent
+         * as a discrete packet (e.g., UDP).
+         *
+         * @param transport Reference to the underlying writable transport (e.g., UdpTransport).
+         *
+         * Example usage:
+         * @code
+         * net_io::UdpTransport udp;
+         * udp.open_connect(endpoint);
+         * DatagramSink sink(udp);
+         * sink.write("hello", 5);
+         * sink.flush(); // sends the datagram
+         * @endcode
+         */
         explicit DatagramSink(T& transport) noexcept
             : transport_(transport)
         {
         }
 
+        /**
+         * @brief Writes data to the internal buffer.
+         *
+         * The data is not sent immediately. It is accumulated in the buffer until flush() is called.
+         *
+         * @param data Pointer to the data to write.
+         * @param size Number of bytes to write.
+         */
         void write(const char* data, std::size_t size)
         {
             buffer_.insert(buffer_.end(), data, data + size);
         }
+
+        /**
+         * @brief Writes a span of bytes to the internal buffer.
+         *
+         * @param data Span of bytes to write.
+         */
         void write(std::span<const std::byte> data)
         {
             write(reinterpret_cast<const char*>(data.data()), data.size());
         }
+
+        /**
+         * @brief Writes a span of chars to the internal buffer.
+         *
+         * @param data Span of chars to write.
+         */
         void write(std::span<const char> data)
         {
             write(data.data(), data.size());
         }
 
+        /**
+         * @brief Sends the contents of the buffer as a single datagram.
+         *
+         * If the buffer is empty, nothing is sent. After sending, the buffer is cleared.
+         *
+         * Example:
+         * @code
+         * sink.write("abc", 3);
+         * sink.write("def", 3);
+         * sink.flush(); // sends "abcdef" as one datagram
+         * @endcode
+         */
         void flush() noexcept
         {
             if (!buffer_.empty())
@@ -192,15 +342,32 @@ export namespace net_io_adapters
             }
         }
 
-        // Addition: write_to for DuplexDatagramStream
+        /**
+         * @brief Sends a datagram directly to a specified address.
+         *
+         * This method bypasses the internal buffer and immediately sends the provided data
+         * to the given destination address. It is typically used in scenarios where the
+         * destination may change per datagram (e.g., server responding to multiple clients).
+         *
+         * @param data Pointer to the data to send.
+         * @param size Number of bytes to send.
+         * @param to_addr Destination address (sockaddr_storage).
+         * @param to_len Length of the destination address structure.
+         *
+         * Example:
+         * @code
+         * sockaddr_storage addr = ...;
+         * sink.write_to("pong", 4, addr, sizeof(addr));
+         * @endcode
+         */
         void write_to(const char* data, std::size_t size, const sockaddr_storage& to_addr, socklen_t to_len)
         {
             transport_.write_to(data, size, to_addr, to_len);
         }
 
     private:
-        T& transport_;
-        std::vector<char> buffer_;
+        T& transport_;              // Reference to the underlying transport object
+        std::vector<char> buffer_;  // Buffer for accumulating outgoing datagram data
     };
 
     // Factory function for DatagramSink
@@ -268,7 +435,7 @@ export namespace net_io_adapters
     };
 
     // Factory function for DatagramSource
-    template<net_io_concepts::Readable T> // <--- angepasst
+    template<net_io_concepts::Readable T>
     DatagramSource<T> make_datagram_source(T& t)
     {
         return DatagramSource<T>(t);
@@ -537,6 +704,29 @@ export namespace net_io_adapters
     };
 
     // --- Concepts for Endpoints ---
+    /**
+     * @brief Concept for types that behave like a UDP endpoint.
+     *
+     * A type satisfies UdpEndpointLike if it provides the following members:
+     *   - address: convertible to std::string (the IP address or hostname)
+     *   - port: convertible to uint16_t (the UDP port)
+     *   - bind_local: convertible to bool (whether to bind to a local address)
+     *   - local_port: convertible to uint16_t (the local port to bind)
+     *
+     * This concept is useful for generic code that needs to accept any type
+     * representing a UDP endpoint, not just a specific class.
+     *
+     * Example:
+     * @code
+     * struct MyUdpEndpoint {
+     *     std::string address;
+     *     uint16_t port;
+     *     bool bind_local;
+     *     uint16_t local_port;
+     * };
+     * static_assert(UdpEndpointLike<MyUdpEndpoint>);
+     * @endcode
+     */
     template<typename T>
     concept UdpEndpointLike = requires(T ep)
     {
@@ -546,6 +736,25 @@ export namespace net_io_adapters
         { ep.local_port } -> std::convertible_to<uint16_t>;
     };
 
+    /**
+     * @brief Concept for types that behave like a TCP endpoint.
+     *
+     * A type satisfies TcpEndpointLike if it provides the following members:
+     *   - address: convertible to std::string (the IP address or hostname)
+     *   - port: convertible to uint16_t (the TCP port)
+     *
+     * This concept explicitly excludes types that satisfy UdpEndpointLike,
+     * to avoid ambiguity when a type could represent both protocols.
+     *
+     * Example:
+     * @code
+     * struct MyTcpEndpoint {
+     *     std::string address;
+     *     uint16_t port;
+     * };
+     * static_assert(TcpEndpointLike<MyTcpEndpoint>);
+     * @endcode
+     */
     template<typename T>
     concept TcpEndpointLike =
         requires(T ep)

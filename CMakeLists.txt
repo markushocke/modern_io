@@ -2,44 +2,44 @@ cmake_minimum_required(VERSION 3.28)
 project(IOProject LANGUAGES CXX)
 
 # ----------------------------
-# 1) Allgemeine C++20-Einstellungen
+# 1) General C++20 settings
 # ----------------------------
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_VERBOSE_MAKEFILE ON)  # Optional: zeigt alle Kommandos während des Builds
+set(CMAKE_VERBOSE_MAKEFILE ON)  # Optional: shows all commands during the build process for debugging purposes
 
 # ----------------------------
-# 2) Compiler-Erkennung und Modul-Flags
+# 2) Compiler detection and module flags
 # ----------------------------
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     message(STATUS "✅ Clang detected: enabling module scan")
-    set(CMAKE_CXX_SCAN_FOR_MODULES ON)
+    set(CMAKE_CXX_SCAN_FOR_MODULES ON) # Enables automatic scanning for C++20 modules with Clang
 
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     message(WARNING "⚠️ GCC detected: enabling experimental modules, manual ordering may be needed")
-    add_compile_options(-fmodules-ts)
+    add_compile_options(-fmodules-ts) # Enables experimental C++20 modules support for GCC
 
 elseif (MSVC)
     message(STATUS "✅ MSVC detected: enabling module support")
-    # Modul-Scan aktivieren
+    # Enable module scanning for MSVC (Visual Studio 2022 17.6+)
     set(CMAKE_CXX_SCAN_FOR_MODULES ON)
-    # Wo IFC-Dateien abgelegt werden
+    # Specify the directory where interface files (IFC) are stored
     set(CMAKE_CXX_MODULE_DIRECTORY "${CMAKE_BINARY_DIR}/ifc")
-    # Nur diesen einen Flag für Module (kein /module:interface)
+    # Use only this flag for modules (do not use /module:interface directly)
     add_compile_options(/experimental:module)
-    # Ab VS 17.9+ kann man optional aktivieren:
+    # For Visual Studio 17.9+ you can optionally enable dynamic dependency scanning:
     # set(CMAKE_EXPERIMENTAL_CXX_MODULE_DYNDEP ON)
 else()
-    message(WARNING "Unknown compiler: module support may not work.")
+    message(WARNING "Unknown compiler: module support may not work. Please check your toolchain documentation.")
 endif()
 
-# Makro für MSVC-spezifische Target-Optionen
+# Macro for setting MSVC-specific target properties for modules
 macro(add_module_target target)
     if (MSVC)
         set_target_properties(${target} PROPERTIES
-            CXX_SCAN_FOR_MODULES YES
-            CXX_MODULE_DIRECTORY "${CMAKE_CXX_MODULE_DIRECTORY}/${target}"
+            CXX_SCAN_FOR_MODULES YES # Enables module scanning for this target
+            CXX_MODULE_DIRECTORY "${CMAKE_CXX_MODULE_DIRECTORY}/${target}" # Sets a separate IFC directory per target
         )
     endif()
 endmacro()
@@ -64,6 +64,7 @@ add_module_target(modern_io)
 # ----------------------------
 # 4) net_io Library
 # ----------------------------
+# This library provides network primitives such as TcpClient, TcpServer, UdpTransport, etc.
 add_library(net_io)
 target_sources(net_io
   PUBLIC
@@ -84,6 +85,7 @@ add_module_target(net_io)
 # ----------------------------
 # 5) net_io_adapters Library
 # ----------------------------
+# This library provides adapters to bridge modern_io and net_io, such as TransportSink, TransportSource, etc.
 add_library(net_io_adapters)
 target_sources(net_io_adapters
   PUBLIC
@@ -97,11 +99,13 @@ add_module_target(net_io_adapters)
 # ----------------------------
 # 6) Executable IOApp
 # ----------------------------
+# This is the main application that uses the net_io_adapters library.
 add_executable(IOApp ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 target_link_libraries(IOApp PRIVATE net_io_adapters)
 target_compile_features(IOApp PRIVATE cxx_std_20)
 
-# Compile-Check: Dummy-Target für alle Module
+# Compile check: Dummy target to ensure all modules compile together.
+# This target is not built by default, but can be used to check module integration.
 add_executable(module_compile_check EXCLUDE_FROM_ALL main.cpp)
 target_link_libraries(module_compile_check PRIVATE net_io_adapters)
 target_compile_features(module_compile_check PRIVATE cxx_std_20)

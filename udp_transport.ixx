@@ -446,12 +446,12 @@ public:
 #else
         ::sendto(fd_, data, size, 0,
                  reinterpret_cast<const sockaddr*>(&to_addr), to_len);
+#endif
         }
         else
         {
             write(data, size);
         }
-#endif
     }
 
     /**

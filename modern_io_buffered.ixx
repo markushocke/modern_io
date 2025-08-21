@@ -214,4 +214,12 @@ private:
     std::size_t        pos_;
     std::size_t        end_;
 };
+
+
+template<typename Stream>
+BufferedOutputStream(Stream&&) -> BufferedOutputStream<std::decay_t<Stream>>;
+
+template<typename Stream>
+BufferedInputStream(Stream&&) -> BufferedInputStream<std::decay_t<Stream>>;
+
 } // namespace modern_io

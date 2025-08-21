@@ -34,7 +34,7 @@ class DataOutputStream
 {
 public:
     /// Constructor with sink and endian.
-    explicit DataOutputStream(S sink, std::endian order)
+    explicit DataOutputStream(S sink, std::endian order = std::endian::big)
       : sink_(std::move(sink))
       , order_(order)
     {}
@@ -163,7 +163,7 @@ class DataInputStream
 {
 public:
     /// Constructor with source and endian.
-    explicit DataInputStream(S source, std::endian order)
+    explicit DataInputStream(S source, std::endian order = std::endian::big)
       : source_(std::move(source))
       , order_(order)
     {}
@@ -286,4 +286,13 @@ private:
     S             source_;
     std::endian   order_;
 };
+
+// Beispiel für DataOutputStream
+template<typename Stream>
+DataOutputStream(Stream&&, std::endian) -> DataOutputStream<std::decay_t<Stream>>;
+
+// Beispiel für DataInputStream
+template<typename Stream>
+DataInputStream(Stream&&, std::endian) -> DataInputStream<std::decay_t<Stream>>;
+
 } // namespace modern_io

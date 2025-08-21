@@ -121,9 +121,8 @@ import net_io_adapters;
 using namespace net_io;
 using namespace net_io_adapters;
 
-// Client
-TcpEndpoint ep("127.0.0.1", 9000);
-auto stream = make_shared_stream(ep);
+// Client: Template-Parameter werden automatisch deduziert!
+auto stream = make_stream(TcpEndpoint("127.0.0.1", 9000));
 DataOutputStream out(stream, std::endian::big);
 out.write_string("Hello TCP");
 out.flush();
@@ -139,9 +138,8 @@ import net_io_adapters;
 using namespace net_io;
 using namespace net_io_adapters;
 
-// Client
-UdpEndpoint ep("127.0.0.1", 9001);
-auto stream = make_shared_stream(ep);
+// Client: Template-Parameter werden automatisch deduziert!
+auto stream = make_stream(UdpEndpoint("127.0.0.1", 9001));
 DataOutputStream out(stream, std::endian::big);
 out.write_string("Hello UDP");
 out.flush();
@@ -188,6 +186,27 @@ void tcp_server()
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     running = false;
 }
+```
+
+---
+
+## Generische Server-Factory
+
+```cpp
+ThreadExecutor exec;
+std::atomic<bool> running{true};
+run_server(
+    exec,
+    [](auto&& stream) {
+        DataInputStream in(stream, std::endian::big);
+        DataOutputStream out(stream, std::endian::big);
+        std::string msg = in.read_string();
+        out.write_string("Echo: " + msg);
+        out.flush();
+    },
+    running,
+    TcpEndpoint{"127.0.0.1", 9050}
+);
 ```
 
 ---
@@ -259,4 +278,3 @@ For questions, bug reports, or contributions, please open an issue or pull reque
 ## Support
 
 For questions, bug reports, or contributions, please open an issue or pull request on GitHub.
-

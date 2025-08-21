@@ -121,7 +121,12 @@ export namespace net_io
      */
     ~TcpClient()
     {
-      close();
+      // Niemals Exception im Destruktor werfen!
+      try {
+        close();
+      } catch (...) {
+        // Fehler ignorieren, niemals Exception propagieren
+      }
     }
 
     /**

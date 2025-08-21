@@ -134,6 +134,7 @@ public:
 #if defined(_WIN32)
         detail::ensure_wsa();
 #endif
+        isBoundLocal = ep.bind_local;
         auto addr_local = ep.to_sockaddr(true);
         socklen_t len   = sizeof(addr_local);
 
@@ -437,12 +438,19 @@ public:
     void write_to(const char* data, std::size_t size,
                   const sockaddr_storage& to_addr, socklen_t to_len) noexcept
     {
+        if(isBoundLocal)
+        {
 #if defined(_WIN32)
         ::sendto(fd_, data, static_cast<int>(size), 0,
                   reinterpret_cast<const sockaddr*>(&to_addr), to_len);
 #else
         ::sendto(fd_, data, size, 0,
                  reinterpret_cast<const sockaddr*>(&to_addr), to_len);
+        }
+        else
+        {
+            write(data, size);
+        }
 #endif
     }
 
@@ -516,6 +524,7 @@ public:
 
 private:
     sock_t fd_{ invalid_socket }; ///< The socket handle.
+    bool isBoundLocal{ false };    ///< Whether the socket is bound to a local address.
 };
 
 } // namespace net_io

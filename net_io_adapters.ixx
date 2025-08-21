@@ -87,11 +87,10 @@ export namespace net_io_adapters
     {
     public:
         /**
-         * @brief Constructs a TransportSink from a writable transport.
-         * @param t Reference to the writable transport.
+         * @brief Konstruktor: shared_ptr statt Referenz!
          */
-        explicit TransportSink(T& t) noexcept
-            : t_(t)
+        explicit TransportSink(std::shared_ptr<T> t) noexcept
+            : t_(std::move(t))
         {
         }
 
@@ -102,7 +101,7 @@ export namespace net_io_adapters
          */
         void write(const char* data, std::size_t size)
         {
-            t_.write(data, size);
+            t_->write(data, size);
         }
 
         /**
@@ -149,11 +148,15 @@ export namespace net_io_adapters
         auto write_to(Args&&... args)
             -> decltype(std::declval<U&>().write_to(std::forward<Args>(args)...))
         {
-            return t_.write_to(std::forward<Args>(args)...);
+            return t_->write_to(std::forward<Args>(args)...);
         }
 
+        // Zugriff auf das shared_ptr (z.B. für native_handle)
+        std::shared_ptr<T>& underlying() noexcept { return t_; }
+        const std::shared_ptr<T>& underlying() const noexcept { return t_; }
+
     private:
-        T& t_; ///< Reference to the underlying writable transport.
+        std::shared_ptr<T> t_; ///< shared_ptr statt Referenz!
     };
 
     /**
@@ -176,11 +179,10 @@ export namespace net_io_adapters
     {
     public:
         /**
-         * @brief Constructs a TransportSource from a readable transport.
-         * @param t Reference to the readable transport.
+         * @brief Konstruktor: shared_ptr statt Referenz!
          */
-        explicit TransportSource(T& t) noexcept
-            : t_(t)
+        explicit TransportSource(std::shared_ptr<T> t) noexcept
+            : t_(std::move(t))
         {
         }
 
@@ -192,7 +194,7 @@ export namespace net_io_adapters
          */
         std::size_t read(char* data, std::size_t size)
         {
-            return t_.read(data, size);
+            return t_->read(data, size);
         }
 
         /**
@@ -238,9 +240,9 @@ export namespace net_io_adapters
          */
         std::size_t read(char* data, std::size_t size, sockaddr_storage* from, socklen_t* fromlen)
         {
-            if constexpr (requires { t_.read(data, size, from, fromlen); }) 
+            if constexpr (requires { t_->read(data, size, from, fromlen); }) 
             {
-                return t_.read(data, size, from, fromlen);
+                return t_->read(data, size, from, fromlen);
             } 
             else 
             {
@@ -249,15 +251,11 @@ export namespace net_io_adapters
             }
         }
 
-        /**
-         * @brief Provides access to the underlying transport object.
-         * @return Reference to the underlying transport.
-         */
-        T& underlying() noexcept { return t_; }
-        const T& underlying() const noexcept { return t_; }
+        std::shared_ptr<T>& underlying() noexcept { return t_; }
+        const std::shared_ptr<T>& underlying() const noexcept { return t_; }
 
     private:
-        T& t_; ///< Reference to the underlying readable transport.
+        std::shared_ptr<T> t_; ///< shared_ptr statt Referenz!
     };
 
     // Adapter for UDP datagram output, buffers until flush
@@ -283,7 +281,7 @@ export namespace net_io_adapters
          * sink.flush(); // sends the datagram
          * @endcode
          */
-        explicit DatagramSink(T& transport) noexcept
+        explicit DatagramSink(const std::shared_ptr<T>& transport) noexcept
             : transport_(transport)
         {
         }
@@ -337,7 +335,7 @@ export namespace net_io_adapters
         {
             if (!buffer_.empty())
             {
-                transport_.write(buffer_.data(), buffer_.size());
+                transport_->write(buffer_.data(), buffer_.size());
                 buffer_.clear();
             }
         }
@@ -362,19 +360,19 @@ export namespace net_io_adapters
          */
         void write_to(const char* data, std::size_t size, const sockaddr_storage& to_addr, socklen_t to_len)
         {
-            transport_.write_to(data, size, to_addr, to_len);
+            transport_->write_to(data, size, to_addr, to_len);
         }
 
     private:
-        T& transport_;              // Reference to the underlying transport object
+        std::shared_ptr<T> transport_;              // Reference to the underlying transport object
         std::vector<char> buffer_;  // Buffer for accumulating outgoing datagram data
     };
 
     // Factory function for DatagramSink
     template<net_io_concepts::Writable T> // <--- angepasst
-    DatagramSink<T> make_datagram_sink(T& t)
+    DatagramSink<T> make_datagram_sink(std::shared_ptr<T> t)
     {
-        return DatagramSink<T>(t);
+        return DatagramSink<T>(*t);
     }
 
     // Adapter for UDP datagram input, reads one datagram at a time
@@ -382,7 +380,7 @@ export namespace net_io_adapters
     class DatagramSource
     {
     public:
-        explicit DatagramSource(T& transport) noexcept
+        explicit DatagramSource(const std::shared_ptr<T>& transport) noexcept
             : transport_(transport), pos_(0)
         {
         }
@@ -392,7 +390,7 @@ export namespace net_io_adapters
             {
                 // Fetch next datagram
                 buffer_.resize(max_packet_);
-                auto got = transport_.read(buffer_.data(), buffer_.size());
+                auto got = transport_->read(buffer_.data(), buffer_.size());
                 if (got == 0)
                 {
                     return 0; // No datagram – EOF
@@ -419,7 +417,7 @@ export namespace net_io_adapters
         std::size_t read(char* data, std::size_t size, sockaddr_storage* from, socklen_t* fromlen)
         {
             // Clear the buffer and read a datagram directly from the transport
-            return transport_.read(data, size, from, fromlen);
+            return transport_->read(data, size, from, fromlen);
         }
 
         bool eof() const noexcept
@@ -429,16 +427,16 @@ export namespace net_io_adapters
 
     private:
         static constexpr std::size_t max_packet_ = 65507; // max UDP payload
-        T& transport_;
+        std::shared_ptr<T> transport_;
         std::vector<char> buffer_;
         std::size_t pos_;
     };
 
     // Factory function for DatagramSource
     template<net_io_concepts::Readable T>
-    DatagramSource<T> make_datagram_source(T& t)
+    DatagramSource<T> make_datagram_source(std::shared_ptr<T> t)
     {
-        return DatagramSource<T>(t);
+        return DatagramSource<T>(*t);
     }
 
     // DuplexDatagramStream: Bidirectional datagram stream with address management
@@ -483,8 +481,8 @@ export namespace net_io_adapters
         void write(const char* data, std::size_t size)
         {
             std::lock_guard<std::mutex> lock(mtx_);
-            if (!last_peer_)
-                throw std::runtime_error("No peer address known for write");
+            // if (!last_peer_)
+            //     throw std::runtime_error("No peer address known for write");
             sink_.write_to(data, size, last_peer_->first, last_peer_->second);
         }
         void write(std::span<const std::byte> data)
@@ -764,77 +762,94 @@ export namespace net_io_adapters
         }
         && (!UdpEndpointLike<T>);
 
-    // --- Generic Factory ---
+    // --- Generische Factory für beliebige Transporttypen (Client) ---
     /**
-     * @brief Creates a suitable SharedStream for TCP or UDP endpoints.
-     * @param ep Endpoint (TcpEndpoint or UdpEndpoint)
-     * @return SharedStream for TCP (Source+Sink) or UDP (DuplexDatagramStream)
+     * @brief Erzeugt einen SharedStream für beliebige Transporttypen.
+     *        Die Factory erkennt TCP/UDP/sonstige Transports automatisch.
+     *        Die Rückgabe ist immer ein SharedStream, der InputStream/OutputStream erfüllt.
+     *
+     * Beispiel:
+     *   auto stream = make_stream(TcpEndpoint{...});
+     *   auto stream = make_stream(UdpEndpoint{...});
+     *   auto stream = make_stream(std::make_shared<MyTransport>(...));
      */
-
-    // TCP variant: needs keepalive
-    template<typename Endpoint>
-        requires TcpEndpointLike<Endpoint>
-    auto make_shared_stream(const Endpoint& ep)
+    template<typename EndpointOrTransport>
+    auto make_stream(EndpointOrTransport&& ep_or_transport)
     {
-        // TCP: Duplex stream (read/write/flush/eof)
-        // NOTE: shared_ptr must point to a dedicated TcpClient!
-        auto client = std::make_shared<net_io::TcpClient>(ep);
-        client->open();
-        // The TransportSource/Sink must reference *client!
-        auto src  = TransportSource<net_io::TcpClient>(*client);
-        auto sink = TransportSink<net_io::TcpClient>(*client);
-        using DuplexType = TcpDuplexStream<decltype(src), decltype(sink)>;
-        struct DuplexWithClient : DuplexType {
-            std::shared_ptr<net_io::TcpClient> keepalive_;
-            DuplexWithClient(DuplexType&& base, std::shared_ptr<net_io::TcpClient> c)
-                : DuplexType(std::move(base)), keepalive_(std::move(c)) {}
-        };
-        // explicit std::move for DuplexType
-        auto duplex = std::make_shared<DuplexWithClient>(
-            std::move(DuplexType(std::move(src), std::move(sink))), client
-        );
-        return SharedStream<DuplexWithClient>(duplex);
-    }
-
-    template<typename Endpoint>
-        requires UdpEndpointLike<Endpoint>
-    auto make_shared_stream(const Endpoint& ep)
-    {
-        auto udp = std::make_shared<net_io::UdpTransport>();
-        udp->open_connect(ep);
-        auto src  = make_datagram_source(*udp);
-        auto sink = make_datagram_sink(*udp);
-        using DuplexType = DuplexDatagramStream<decltype(src), decltype(sink)>;
-        struct DuplexWithUdp : DuplexType
+        using T = std::decay_t<EndpointOrTransport>;
+        if constexpr (TcpEndpointLike<T>) {
+            // TCP Endpoint: Erzeuge TcpClient, öffne Verbindung, adaptiere
+            auto client = std::make_shared<net_io::TcpClient>(std::forward<EndpointOrTransport>(ep_or_transport));
+            client->open();
+            auto src  = TransportSource<net_io::TcpClient>(client);
+            auto sink = TransportSink<net_io::TcpClient>(client);
+            using DuplexType = TcpDuplexStream<decltype(src), decltype(sink)>;
+            auto duplex = std::make_shared<DuplexType>(std::move(src), std::move(sink));
+            return SharedStream<DuplexType>(duplex);
+        } else if constexpr (UdpEndpointLike<T>) {
+            // UDP Endpoint: Erzeuge UdpTransport, öffne Verbindung, adaptiere
+            auto udp = std::make_shared<net_io::UdpTransport>();
+            if (ep_or_transport.bind_local)
+            {
+                // Server-Modus: bind auf lokalen Port
+                udp->open_bind(std::forward<EndpointOrTransport>(ep_or_transport));
+            }
+            else
+            {
+                // Client-Modus: connect zu Ziel
+                udp->open_connect(std::forward<EndpointOrTransport>(ep_or_transport));
+            }
+            auto src  = DatagramSource<net_io::UdpTransport>(udp);
+            auto sink = DatagramSink<net_io::UdpTransport>(udp);
+            using DuplexType = DuplexDatagramStream<decltype(src), decltype(sink)>;
+            auto duplex = std::make_shared<DuplexType>(std::move(src), std::move(sink));
+            return SharedStream<DuplexType>(duplex);
+        } else if constexpr (std::is_pointer_v<T> ||
+                             std::is_same_v<T, std::shared_ptr<std::decay_t<decltype(*ep_or_transport)>>>)
         {
-            std::shared_ptr<net_io::UdpTransport> keepalive_;
-            DuplexWithUdp(DuplexType&& base, std::shared_ptr<net_io::UdpTransport> u)
-                : DuplexType(std::move(base)), keepalive_(std::move(u)) {}
-        };
-        // explicit std::move for DuplexType
-        auto duplex = std::make_shared<DuplexWithUdp>(
-            std::move(DuplexType(std::move(src), std::move(sink))), udp
-        );
-        auto shared_duplex = SharedStream<DuplexWithUdp>(duplex);
-        shared_duplex.set_peer(ep);
-        return shared_duplex;
+            // Für shared_ptr<T> oder T* (z.B. eigene Transportklassen)
+            using U = std::remove_pointer_t<T>;
+            std::shared_ptr<U> ptr = std::is_pointer_v<T> ? std::shared_ptr<U>(ep_or_transport) : ep_or_transport;
+            auto src  = TransportSource<U>(ptr);
+            auto sink = TransportSink<U>(ptr);
+            using DuplexType = TcpDuplexStream<decltype(src), decltype(sink)>;
+            auto duplex = std::make_shared<DuplexType>(std::move(src), std::move(sink));
+            return SharedStream<DuplexType>(duplex);
+        } else {
+            // Für beliebige Transport-Objekte (by value/ref)
+            auto obj = std::make_shared<T>(std::forward<EndpointOrTransport>(ep_or_transport));
+            auto src  = TransportSource<T>(obj);
+            auto sink = TransportSink<T>(obj);
+            using DuplexType = TcpDuplexStream<decltype(src), decltype(sink)>;
+            auto duplex = std::make_shared<DuplexType>(std::move(src), std::move(sink));
+            return SharedStream<DuplexType>(duplex);
+        }
     }
 
-    // UDP-Server: Factory for SharedStream<DuplexDatagramStream<...>> (with correct namespace)
-    inline auto make_shared_stream_for_server(const net_io::UdpEndpoint& ep)
+    // --- Convenience StreamBuilder for TCP ---
+    /**
+     * @brief Convenience StreamBuilder for TCP: creates a SharedStream with keepalive.
+     * @param client shared_ptr to TcpClient
+     * @param server shared_ptr to TcpServer
+     * @return SharedStream with keepalive for both server and client
+     */
+    inline auto tcp_stream_builder(
+        std::shared_ptr<net_io::TcpClient> client,
+        std::shared_ptr<net_io::TcpServer> server)
     {
-        auto udp = std::make_shared<net_io::UdpTransport>();
-        udp->open_bind(ep);
-        auto src  = make_datagram_source(*udp);
-        auto sink = make_datagram_sink(*udp);
-        using DuplexType = DuplexDatagramStream<decltype(src), decltype(sink)>;
+        auto src  = TransportSource<net_io::TcpClient>(client);
+        auto sink = TransportSink<net_io::TcpClient>(client);
+        using DuplexType = TcpDuplexStream<decltype(src), decltype(sink)>;
         struct DuplexWithKeepalive : DuplexType {
-            std::shared_ptr<net_io::UdpTransport> keepalive_;
-            DuplexWithKeepalive(DuplexType&& base, std::shared_ptr<net_io::UdpTransport> u)
-                : DuplexType(std::move(base)), keepalive_(std::move(u)) {}
+            std::shared_ptr<net_io::TcpServer> keepalive_server_;
+            std::shared_ptr<net_io::TcpClient> keepalive_client_;
+            DuplexWithKeepalive(DuplexType&& base,
+                               std::shared_ptr<net_io::TcpServer> s,
+                               std::shared_ptr<net_io::TcpClient> c)
+                : DuplexType(std::move(base)), keepalive_server_(std::move(s)), keepalive_client_(std::move(c)) {}
         };
         auto duplex = std::make_shared<DuplexWithKeepalive>(
-            std::move(DuplexType(std::move(src), std::move(sink))), udp
+            DuplexType(std::move(src), std::move(sink)), server, client
         );
         return SharedStream<DuplexWithKeepalive>(duplex);
     }
@@ -865,8 +880,8 @@ export namespace net_io_adapters
     template<
         typename Callback,
         typename StreamBuilder,
-        net_io_concepts::Acceptable ServerType, // <--- angepasst
-        net_io_concepts::Transportable ClientType, // <--- angepasst
+        net_io_concepts::Acceptable ServerType,
+        net_io_concepts::Transportable ClientType,
         Executor Exec,
         typename... ServerArgs
     >
@@ -884,43 +899,15 @@ export namespace net_io_adapters
         executor.execute([server, &executor, make_stream, on_client = std::forward<Callback>(on_client), &running]() mutable {
             while (running) {
                 try {
-                    auto client = std::make_shared<ClientType>(server->accept());
+                    auto accepted = server->accept();
+                    auto client = std::make_shared<ClientType>(std::move(accepted));
                     auto stream = make_stream(client, server);
-                    executor.execute([stream, on_client]() mutable {
-                        on_client(std::move(stream));
-                    });
+                    on_client(stream);
                 } catch (const std::exception& ex) {
                     std::cerr << "[net_io_adapters] Error accepting connection: " << ex.what() << std::endl;
                 }
             }
         });
-    }
-
-   /**
-     * @brief Convenience StreamBuilder for TCP: creates a SharedStream with keepalive.
-     * @param client shared_ptr to TcpClient
-     * @param server shared_ptr to TcpServer
-     * @return SharedStream with keepalive for both server and client
-     */
-    inline auto tcp_stream_builder(
-        std::shared_ptr<net_io::TcpClient> client,
-        std::shared_ptr<net_io::TcpServer> server)
-    {
-        auto src  = TransportSource<net_io::TcpClient>(*client);
-        auto sink = TransportSink<net_io::TcpClient>(*client);
-        using DuplexType = TcpDuplexStream<decltype(src), decltype(sink)>;
-        struct DuplexWithKeepalive : DuplexType {
-            std::shared_ptr<net_io::TcpServer> keepalive_server_;
-            std::shared_ptr<net_io::TcpClient> keepalive_client_;
-            DuplexWithKeepalive(DuplexType&& base,
-                               std::shared_ptr<net_io::TcpServer> s,
-                               std::shared_ptr<net_io::TcpClient> c)
-                : DuplexType(std::move(base)), keepalive_server_(std::move(s)), keepalive_client_(std::move(c)) {}
-        };
-        auto duplex = std::make_shared<DuplexWithKeepalive>(
-            DuplexType(std::move(src), std::move(sink)), server, client
-        );
-        return SharedStream<DuplexWithKeepalive>(duplex);
     }
 
     /**
@@ -963,3 +950,4 @@ export namespace net_io_adapters
         );
     }
 } // namespace net_io_adapters
+

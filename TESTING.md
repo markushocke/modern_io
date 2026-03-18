@@ -1,273 +1,135 @@
-# Test Setup Guide
+# Testing
 
-## Prerequisites
-
-To build and run tests, you need:
-
-- **CMake 3.28+** (for C++20 module support)
-- **Ninja** (recommended for module-aware builds)
-- **C++23 compiler** with modules support:
-  - Clang 16+ (recommended)
-  - GCC 14+ (experimental)
-  - MSVC 19.34+ (Visual Studio 2022 17.4+)
-- **Google Test** (automatically fetched by CMake)
-
-`net_io_async` is currently validated on Linux. The synchronous libraries and tests remain the portable baseline.
-
-## Building with Tests
+## Build & Run
 
 ```bash
-# Configure the project
 cmake -B build -G Ninja -DCMAKE_CXX_COMPILER=clang++
-
-# Build everything including tests
 cmake --build build
-
-# Run all tests
-cd build
-ctest --output-on-failure -j 4
-
-# Or run specific tests
-./tests/modern_io/test_modern_io_file
-./tests/modern_io/test_modern_io_data
-./tests/net_io/test_net_io_base
+cd build && ctest --output-on-failure -j4
 ```
 
-## Test Organization
+Requires CMake 3.28+, Ninja, and a C++23 compiler with module support (Clang 16+ recommended).  
+Google Test is fetched automatically via `FetchContent`.
 
-```
-tests/
-├── CMakeLists.txt
-├── test_net_helpers.hpp            # Shared sync helpers
-├── test_net_async_helpers.hpp      # Async coroutine helpers
-├── package_smoke/
-│   ├── CMakeLists.txt
-│   ├── RunPackageSmoke.cmake.in
-│   └── consumer/
-│       ├── CMakeLists.txt
-│       └── main.cpp
-├── modern_io/
-│   ├── CMakeLists.txt
-│   ├── test_concepts.cpp       # Concept validation tests
-│   ├── test_file.cpp           # File I/O tests
-│   ├── test_data.cpp           # Data serialization tests
-│   ├── test_buffered.cpp       # Buffered I/O tests
-│   └── test_iostream.cpp       # iostream adapter tests
-├── net_io/
-│   ├── CMakeLists.txt
-│   ├── test_base.cpp           # Base functionality tests
-│   ├── test_tcp_endpoint.cpp   # TCP endpoint tests
-│   ├── test_tcp_client.cpp     # TCP client tests
-│   ├── test_tcp_server.cpp     # TCP server tests
-│   ├── test_udp_transport.cpp  # UDP transport tests
-│   ├── udp_ping_pong_integration.cpp
-│   ├── test_concepts_static.cpp
-│   ├── test_concepts_async.cpp
-│   ├── test_async_tcp.cpp
-│   ├── test_async_tcp_multi.cpp
-│   ├── test_async_udp.cpp
-│   ├── test_async_udp_multi.cpp
-│   ├── test_event_loop.cpp
-│   └── test_io_task.cpp
-└── net_io_adapters/
-    ├── CMakeLists.txt
-    └── test_adapters.cpp       # Adapter tests
-```
+### Useful Invocations
 
-## Running Tests in Detail
-
-### Run All Tests
 ```bash
-cd build
-ctest --output-on-failure
-```
-
-### Run Tests with Verbose Output
-```bash
-cd build
-ctest -V
-```
-
-### Run Specific Test Suite
-```bash
-cd build
+# Specific test suite
 ./tests/modern_io/test_modern_io_file --gtest_filter="FileIOTest.*"
-```
 
-### Run Package Smoke Test
-```bash
-cd build
+# Single test case
+./tests/net_io/test_net_io_async_tcp_multi --gtest_filter="AsyncTcpMultiTest.AcceptMultipleClients"
+
+# Package smoke test only
 ctest --output-on-failure -R modern_io_package_consumer_smoke
 ```
 
-### Run Single Test Case
-```bash
-cd build
-./tests/modern_io/test_modern_io_data --gtest_filter="DataStreamTest.Int32BigEndianRoundTrip"
+---
+
+## Test Structure
+
+```
+tests/
+├── test_net_helpers.hpp              # Shared sync test helpers
+├── test_net_async_helpers.hpp        # Async coroutine test helpers
+├── modern_io/
+│   ├── test_concepts.cpp             # Concept validation
+│   ├── test_file.cpp                 # File I/O, EOF, seek, move semantics
+│   ├── test_data.cpp                 # Serialization round-trips, endianness
+│   ├── test_buffered.cpp             # Buffer mechanics, flush, partial reads
+│   └── test_iostream.cpp             # std::stream adapter round-trips
+├── net_io/
+│   ├── test_base.cpp                 # SocketException, platform abstractions
+│   ├── test_tcp_endpoint.cpp         # Parsing, resolution, IPv4/IPv6
+│   ├── test_tcp_client.cpp           # Connection and exchange
+│   ├── test_tcp_server.cpp           # Echo server behavior
+│   ├── test_udp_transport.cpp        # Connected UDP send/receive
+│   ├── test_udp_client_server_integration.cpp
+│   ├── test_udp_send_recv_pairing.cpp
+│   ├── udp_ping_pong_integration.cpp
+│   ├── test_concepts_udp.cpp         # Sync UDP concept checks
+│   ├── test_concepts_static.cpp      # Static API/contract checks
+│   ├── test_concepts_async.cpp       # Async socket & adapter concepts
+│   ├── test_async_tcp.cpp            # Async TCP roundtrip
+│   ├── test_async_tcp_multi.cpp      # Multi-client async accept
+│   ├── test_async_udp.cpp            # Async UDP roundtrip
+│   ├── test_async_udp_multi.cpp      # Multi-client async UDP
+│   ├── test_event_loop.cpp           # Wake, registration, thread-safety
+│   └── test_io_task.cpp              # Return values, exceptions, move
+├── net_io_adapters/
+│   └── test_adapters.cpp             # Shared stream adapter smoke
+└── package_smoke/
+    ├── CMakeLists.txt
+    ├── RunPackageSmoke.cmake.in
+    └── consumer/                     # Validates install tree & linkability
 ```
 
-## Test Coverage
+Current baseline: **102 tests passing** (Linux/Clang).
 
-### modern_io Module
-- ✅ **Concepts**: Static assertions, mock implementations
-- ✅ **File I/O**: Read/write, EOF, seeking, error handling
-- ✅ **Data Streams**: All data types, endianness, exceptions
-- ✅ **Buffered I/O**: Buffer mechanics, flush behavior
-- ✅ **iostream Adapters**: std::stream integration
+---
 
-### net_io Module
-- ✅ **Base**: SocketException, platform abstractions
-- ✅ **TCP Endpoint**: Construction, resolution, IPv4/IPv6
-- ✅ **TCP Client**: Connect and exchange tests
-- ✅ **TCP Server**: Echo server tests
-- ✅ **UDP Transport**: Send/receive integration tests
-- ✅ **Async Concepts**: Compile-time checks for async sockets and adapters
-- ✅ **Async Runtime**: TCP/UDP roundtrip and multi-client tests
-- ✅ **Event Loop**: Wakeup, registration, duplicate handling, thread-safety
-- ✅ **Task Layer**: Return values, exception propagation, move semantics
-
-### net_io_adapters Module
-- ✅ **Adapters**: Shared stream adapter tests implemented
-
-### Packaging
-- ✅ **Package Smoke**: install tree, config file, version file, exported targets, and consumer linkability are validated via `modern_io_package_consumer_smoke`
-
-Current baseline in the main build: **101 tests passing**.
-
-## Adding New Tests
-
-### 1. Create Test File
-
-Create a new `.cpp` file in the appropriate test directory:
+## Adding a Test
 
 ```cpp
-// test_myfeature.cpp
-import modern_io;
-import modern_io.myfeature;
+// tests/net_io/test_myfeature.cpp
+import net_io;
 #include <gtest/gtest.h>
 
-using namespace modern_io;
-
-TEST(MyFeatureTest, BasicFunctionality) {
-    // Your test code here
+TEST(MyFeatureTest, BasicBehavior) {
     EXPECT_EQ(1 + 1, 2);
 }
 ```
 
-### 2. Register in CMakeLists.txt
-
-Add to the appropriate `tests/*/CMakeLists.txt`:
-
 ```cmake
+# tests/net_io/CMakeLists.txt
 add_executable(test_myfeature test_myfeature.cpp)
-target_link_libraries(test_myfeature PRIVATE modern_io GTest::gtest_main)
+target_link_libraries(test_myfeature PRIVATE net_io GTest::gtest_main)
 target_compile_features(test_myfeature PRIVATE cxx_std_23)
 gtest_discover_tests(test_myfeature)
 ```
 
-### 3. Build and Run
+---
+
+## CI Pipeline
+
+The GitHub Actions workflow (`.github/workflows/cmake-multi-platform.yml`) runs four jobs on every push/PR to `main`:
+
+| Job | What it does |
+|---|---|
+| **linux-clang-full** | Full build, full `ctest` (102 tests) |
+| **linux-clang-async-focus** | Builds only async targets, runs them individually with `timeout`, plus 25× repeated multi-accept stress loop |
+| **linux-clang-asan-async** | ASAN + LeakSanitizer build of async targets (`detect_leaks=1`, `abort_on_error=1`) |
+| **windows-msvc-sync** | Sync-only build (`modern_io`, `net_io`, `net_io_adapters` + their tests) |
+
+`net_io_async` is Linux-only (epoll). The Windows job validates the sync baseline until another backend exists.
+
+---
+
+## ASAN / Leak Detection
+
+The CI ASAN job covers async targets automatically.  For local runs:
 
 ```bash
-cmake --build build
-cd build
-ctest -R test_myfeature
+cmake -B build_asan -G Ninja \
+  -DCMAKE_CXX_COMPILER=clang++ \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address"
+cmake --build build_asan
+ASAN_OPTIONS=detect_leaks=1 ./build_asan/tests/net_io/test_net_io_event_loop
 ```
 
-## Exception Testing
-
-The framework includes comprehensive exception types. Example test:
-
-```cpp
-TEST(FileIOTest, OpenNonexistentFile) {
-    EXPECT_THROW({
-        FileInputStream in("nonexistent.txt");
-    }, FileIOException);
-    
-    try {
-        FileInputStream in("nonexistent.txt");
-        FAIL() << "Expected FileIOException";
-    } catch (const FileIOException& e) {
-        EXPECT_EQ(e.filepath(), "nonexistent.txt");
-        EXPECT_NE(e.error_code(), 0);
-    }
-}
+Valgrind works as well:
+```bash
+valgrind --leak-check=full ./build/tests/net_io/test_net_io_event_loop
 ```
 
-## Continuous Integration
-
-For CI/CD pipelines:
-
-```yaml
-# Example GitHub Actions workflow
-- name: Build and Test
-  run: |
-        cmake -B build -G Ninja -DCMAKE_CXX_COMPILER=clang++
-    cmake --build build
-        cd build && ctest --output-on-failure -j 4
-```
-
-Recommended CI policy:
-- Run full build and full test suite on Linux with Clang.
-- Validate sync targets on Windows as build-only until `net_io_async` gains a non-Linux backend.
+---
 
 ## Troubleshooting
 
-### CMake Version Too Old
-```
-Error: CMake 3.28 or higher is required
-```
-**Solution**: Update CMake or build from source.
-
-### Compiler Doesn't Support Modules
-```
-Error: C++20 modules are not supported
-```
-**Solution**: Use Clang 16+ or update your compiler.
-
-### Async Build On Non-Linux Platforms
-`net_io_async` currently depends on the Linux event-loop backend (`epoll`/`eventfd`).
-
-**Solution**: run full async validation on Linux, and keep Windows CI focused on `modern_io`, `net_io`, and `net_io_adapters` until another backend is implemented.
-
-### Google Test Download Fails
-```
-Error: Could not download googletest
-```
-**Solution**: Check internet connection or manually install Google Test.
-
-### Test Compilation Errors
-```
-Error: unknown type name 'import'
-```
-**Solution**: Ensure compiler has C++23 and modules enabled.
-
-## Performance Testing
-
-For performance-sensitive code, use:
-
-```cpp
-TEST(DataStreamTest, LargeDataTransfer) {
-    auto start = std::chrono::high_resolution_clock::now();
-    
-    // Your performance test
-    
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-    
-    EXPECT_LT(duration.count(), 1000);  // Should complete in < 1 second
-}
-```
-
-## Memory Leak Detection
-
-### With Valgrind (Linux)
-```bash
-valgrind --leak-check=full ./tests/modern_io/test_modern_io_file
-```
-
-### With AddressSanitizer
-```bash
-cmake -B build -DCMAKE_CXX_FLAGS="-fsanitize=address"
-cmake --build build
-./tests/modern_io/test_modern_io_file
-```
+| Symptom | Fix |
+|---|---|
+| `CMake 3.28 or higher is required` | Update CMake |
+| `unknown type name 'import'` | Use Clang 16+ with C++23 modules |
+| Async tests fail to build on Windows/macOS | Expected — `net_io_async` requires Linux (epoll) |
+| Google Test download fails | Check network; or install gtest system-wide |

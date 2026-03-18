@@ -18,6 +18,7 @@ import net_io.tcp_endpoint;
 import net_io.event_loop;
 #include <thread>
 #include <vector>
+#include <chrono>
 
 import net_io.async_utils;
 import net_io.async_stream_adapters;
@@ -71,6 +72,7 @@ TEST(AsyncTcpMultiTest, AcceptMultipleClients) {
     // gather accept results
     std::vector<std::shared_ptr<net_io::AsyncTcpSocket>> server_socks;
     for (auto &f : futures) {
+        ASSERT_EQ(f.wait_for(std::chrono::seconds(2)), std::future_status::ready);
         auto res = f.get();
         ASSERT_TRUE((bool)res);
         server_socks.push_back(res.value());
@@ -88,18 +90,26 @@ TEST(AsyncTcpMultiTest, AcceptMultipleClients) {
 #endif
     }
 
-    // each client send a short message, server should read it
+    // Send from all clients first.
+    // Accept completion order is not guaranteed to match client creation order,
+    // so reading immediately from server_socks[i] after sending from clients[i]
+    // can deadlock when the mapping is permuted.
     for (int i = 0; i < N; ++i) {
         const char* msg = "m";
-        ::send(clients[i], msg, 1, 0);
+        ssize_t sent = ::send(clients[i], msg, 1, 0);
+        ASSERT_EQ(sent, 1);
+    }
+
+    // Now each accepted socket should have exactly one byte available.
+    for (int i = 0; i < N; ++i) {
         std::array<char, 8> buf{};
         // use read_exact_async to ensure we receive exactly 1 byte for stream sockets
-    // Wrap accepted socket into adapter and use high-level helper
-    net_io::AsyncTcpStreamAdapter stream(server_socks[i]);
-    auto rres = sync_run3([&](){ return stream.read_exact_async(std::span<char>(buf.data(), 1)); });
-    ASSERT_TRUE((bool)rres);
-    ASSERT_TRUE(rres.has_value());
-    ASSERT_EQ(buf[0], 'm');
+        // Wrap accepted socket into adapter and use high-level helper
+        net_io::AsyncTcpStreamAdapter stream(server_socks[i]);
+        auto rres = sync_run3([&](){ return stream.read_exact_async(std::span<char>(buf.data(), 1)); });
+        ASSERT_TRUE((bool)rres);
+        ASSERT_TRUE(rres.has_value());
+        ASSERT_EQ(buf[0], 'm');
     }
 
     for (int c : clients) {

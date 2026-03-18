@@ -366,6 +366,7 @@ public:
 
     void close() {
         if (fd_ != invalid_socket) {
+            EventLoop::instance().deregister(fd_);
 #ifdef _WIN32
             ::closesocket(fd_);
 #else

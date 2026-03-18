@@ -90,3 +90,68 @@ TEST(AsyncTcpTest, AcceptAndEcho) {
     server.stop();
     loop.stop();
 }
+
+#ifndef _WIN32
+TEST(AsyncTcpTest, StopClearsPendingAcceptRegistration) {
+    test_helpers::NetInit netinit;
+
+    net_io::EventLoop& loop = net_io::EventLoop::instance();
+    loop.start();
+
+    net_io::AsyncTcpServer first_server;
+    uint16_t first_port = net_io::get_free_tcp_port();
+    auto first_start = first_server.start(net_io::TcpEndpoint("127.0.0.1", first_port), 1);
+    ASSERT_TRUE((bool)first_start);
+
+    const int stale_fd = first_server.native_handle();
+    {
+        auto pending_accept = first_server.accept();
+        pending_accept.native_handle().resume();
+        ASSERT_FALSE(pending_accept.native_handle().done());
+        first_server.stop();
+    }
+
+    bool reused_fd = false;
+    for (int attempt = 0; attempt < 16 && !reused_fd; ++attempt) {
+        net_io::AsyncTcpServer second_server;
+        uint16_t second_port = net_io::get_free_tcp_port();
+        auto second_start = second_server.start(net_io::TcpEndpoint("127.0.0.1", second_port), 1);
+        ASSERT_TRUE((bool)second_start);
+
+        if (second_server.native_handle() != stale_fd) {
+            second_server.stop();
+            continue;
+        }
+
+        reused_fd = true;
+        auto task = accept_and_echo_once(second_server);
+
+        int c = ::socket(AF_INET, SOCK_STREAM, 0);
+        ASSERT_GE(c, 0);
+
+        sockaddr_in sa{};
+        sa.sin_family = AF_INET;
+        sa.sin_port = htons(second_port);
+        inet_pton(AF_INET, "127.0.0.1", &sa.sin_addr);
+
+        int rc = ::connect(c, reinterpret_cast<sockaddr*>(&sa), sizeof(sa));
+        ASSERT_EQ(rc, 0);
+
+        const char* msg = "hello";
+        ::send(c, msg, 5, 0);
+
+        task.get();
+
+        char rbuf[32];
+        int rn = ::recv(c, rbuf, sizeof(rbuf), 0);
+        ASSERT_EQ(rn, 5);
+        ASSERT_EQ(std::string(rbuf, rn), "hello");
+
+        ::close(c);
+        second_server.stop();
+    }
+
+    EXPECT_TRUE(reused_fd) << "expected the OS to reuse the closed listening fd during regression test";
+    loop.stop();
+}
+#endif

@@ -283,38 +283,67 @@ private:
                 for (auto it = w.readers.begin(); it != w.readers.end(); ++it) {
                     auto &h = it->first;
                     auto &sp = it->second;
-                    if (sp) {
-                        if (debug_enabled()) {
-                            std::ostringstream oss;
-                            oss << "[EventLoop] dispatch_fd: reader owner_ptr=" << sp.get() << " handle=" << h.address();
-                            debug_log(oss.str());
-                        }
-                        owners_keepalive.push_back(sp);
-                        to_resume.push_back(h);
-                        // remove this reader from the queue
-                        w.readers.erase(it);
-                        break;
+                    if (debug_enabled()) {
+                        std::ostringstream oss;
+                        oss << "[EventLoop] dispatch_fd: reader owner_ptr=" << sp.get() << " handle=" << h.address();
+                        debug_log(oss.str());
                     }
+                    if (sp) {
+                        owners_keepalive.push_back(sp);
+                    }
+                    to_resume.push_back(h);
+                    // remove this reader from the queue
+                    w.readers.erase(it);
+                    break;
                 }
             }
             if (revents & (EPOLLOUT | EPOLLERR)) {
                 for (auto &p : w.writers) {
                     auto &h = p.first;
                     auto &sp = p.second;
-                    if (sp) {
-                        if (debug_enabled()) {
-                            std::ostringstream oss;
-                            oss << "[EventLoop] dispatch_fd: writer owner_ptr=" << sp.get() << " handle=" << h.address();
-                            debug_log(oss.str());
-                        }
-                        owners_keepalive.push_back(sp); to_resume.push_back(h);
+                    if (debug_enabled()) {
+                        std::ostringstream oss;
+                        oss << "[EventLoop] dispatch_fd: writer owner_ptr=" << sp.get() << " handle=" << h.address();
+                        debug_log(oss.str());
                     }
+                    if (sp) {
+                        owners_keepalive.push_back(sp);
+                    }
+                    to_resume.push_back(h);
                 }
                 w.writers.clear();
             }
+ #ifndef _WIN32
+            uint32_t new_mask = 0;
+            if (!w.readers.empty()) {
+                new_mask |= EPOLLIN;
+            }
+            if (!w.writers.empty()) {
+                new_mask |= EPOLLOUT;
+            }
+
+            if (new_mask == 0) {
+                if (w.current_mask != 0) {
+                    ::epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr);
+                }
+                waiters_.erase(it);
+            } else {
+                if (new_mask != w.current_mask) {
+                    epoll_event ev{};
+                    ev.events = new_mask;
+                    ev.data.fd = fd;
+                    if (::epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, fd, &ev) == 0) {
+                        w.current_mask = new_mask;
+                    } else {
+                        waiters_.erase(it);
+                    }
+                }
+            }
+#else
             if (w.readers.empty() && w.writers.empty()) {
                 waiters_.erase(it);
             }
+#endif
         }
         // Resume collected handles outside of the lock
         std::unordered_set<const void*> seen;
@@ -370,25 +399,21 @@ private:
                 }
                 for (auto &p : w.readers) {
                     auto &h = p.first; auto &sp = p.second;
-                    if (sp) {
-                        if (debug_enabled()) {
-                            std::ostringstream oss;
-                            oss << "[EventLoop] finish_all reader handle=" << h.address() << " owner_ptr=" << sp.get();
-                            debug_log(oss.str());
-                        }
-                        if (h && !h.done()) all.push_back(h);
+                    if (debug_enabled()) {
+                        std::ostringstream oss;
+                        oss << "[EventLoop] finish_all reader handle=" << h.address() << " owner_ptr=" << sp.get();
+                        debug_log(oss.str());
                     }
+                    if (h && !h.done()) all.push_back(h);
                 }
                 for (auto &p : w.writers) {
                     auto &h = p.first; auto &sp = p.second;
-                    if (sp) {
-                        if (debug_enabled()) {
-                            std::ostringstream oss;
-                            oss << "[EventLoop] finish_all writer handle=" << h.address() << " owner_ptr=" << sp.get();
-                            debug_log(oss.str());
-                        }
-                        if (h && !h.done()) all.push_back(h);
+                    if (debug_enabled()) {
+                        std::ostringstream oss;
+                        oss << "[EventLoop] finish_all writer handle=" << h.address() << " owner_ptr=" << sp.get();
+                        debug_log(oss.str());
                     }
+                    if (h && !h.done()) all.push_back(h);
                 }
             }
             waiters_.clear();
@@ -425,10 +450,16 @@ void update_epoll_locked(int fd, uint32_t add_flags, std::unique_lock<std::mutex
         std::vector<std::coroutine_handle<>> to_resume;
         std::vector<std::shared_ptr<void>> owners_keepalive;
         for (auto &p : w.readers) {
-            if (p.second) { owners_keepalive.push_back(p.second); to_resume.push_back(p.first); }
+            if (p.second) {
+                owners_keepalive.push_back(p.second);
+            }
+            to_resume.push_back(p.first);
         }
         for (auto &p : w.writers) {
-            if (p.second) { owners_keepalive.push_back(p.second); to_resume.push_back(p.first); }
+            if (p.second) {
+                owners_keepalive.push_back(p.second);
+            }
+            to_resume.push_back(p.first);
         }
         waiters_.erase(fd);
         lk.unlock();

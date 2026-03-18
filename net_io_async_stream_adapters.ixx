@@ -113,25 +113,11 @@ public:
     // READ with automatic retry logic
     [[nodiscard]] net_io::IoTask<std::expected<std::size_t, std::error_code>> read_async(std::span<char> data) override {
         for (;;) {
-            auto start = [fd = this->native_handle(), owner = std::make_shared<int>(0)](std::coroutine_handle<> h) {
-                EventLoop::instance().register_read(fd, h, owner);
-            };
-            auto finish = [this, data]() -> std::expected<std::size_t, std::error_code> {
-                std::error_code ec;
-                auto n = socket_->low_level_read(data.data(), data.size(), ec);
-                if (n < 0) return std::unexpected(ec);
-                return static_cast<std::size_t>(n);
-            };
-
-            auto r = co_await net_io::make_awaitable_with_hooks<std::expected<std::size_t, std::error_code>>(std::move(start), std::move(finish));
-
+            auto r = co_await socket_->async_read(data);
             if (!r) {
-                if (r.error() == std::errc::operation_would_block ||
-                    r.error() == std::errc::resource_unavailable_try_again) {
-                    continue; // retry
-                }
                 co_return std::unexpected(r.error());
             }
+
             auto n = r.value();
             if (n == 0) {
                 // Empty datagram, ignore and continue
@@ -147,50 +133,14 @@ public:
 
     // WRITE with retry logic for transient errors
     [[nodiscard]] net_io::IoTask<std::expected<std::size_t, std::error_code>> write_async(std::span<const char> data) override {
-        if (default_addrlen_ == 0) {
-            co_return std::unexpected(std::make_error_code(std::errc::destination_address_required));
-        }
-
         if (!socket_->has_peer()) {
+            if (default_addrlen_ == 0) {
+                co_return std::unexpected(std::make_error_code(std::errc::destination_address_required));
+            }
             socket_->set_peer(default_addr_, default_addrlen_);
         }
 
-        constexpr int max_retries = 8;
-        int attempt = 0;
-
-        for (;;) {
-            auto start = [fd = this->native_handle(), owner = std::make_shared<int>(0)](std::coroutine_handle<> h) {
-                EventLoop::instance().register_write(fd, h, owner);
-            };
-            auto finish = [this, data]() -> std::expected<std::size_t, std::error_code> {
-                std::error_code ec;
-                auto n = socket_->low_level_write(data.data(), data.size(), ec);
-                if (n < 0) return std::unexpected(ec);
-                return static_cast<std::size_t>(n);
-            };
-
-            auto w = co_await net_io::make_awaitable_with_hooks<std::expected<std::size_t, std::error_code>>(std::move(start), std::move(finish));
-
-            if (w) {
-                co_return std::expected<std::size_t,std::error_code>{*w};
-            }
-
-            auto ec = w.error();
-            using std::errc;
-            if (ec == errc::operation_would_block ||
-                ec == errc::resource_unavailable_try_again) {
-                if (++attempt > max_retries) {
-                    co_return std::unexpected(ec);
-                }
-                continue; // retry
-            }
-
-            if (ec == errc::interrupted) {
-                continue;
-            }
-
-            co_return std::unexpected(ec);
-        }
+        co_return co_await socket_->async_write(data);
     }
     [[nodiscard]] auto write_async(std::span<const std::byte> data) {
         return write_async(std::span<const char>(reinterpret_cast<const char*>(data.data()), data.size()));

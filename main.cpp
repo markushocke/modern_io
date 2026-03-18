@@ -128,59 +128,76 @@ void async_tcp_example() {
             co_return std::expected<void,std::error_code>{};
         }
 
-        static Detached serve_once(AsyncTcpServer& server) {
+        static ExpectedTask<void> serve_once(AsyncTcpServer& server) {
             auto cli = co_await server.accept();
-            if (!cli) co_return;
+            if (!cli) {
+                co_return std::unexpected(cli.error());
+            }
 
             auto sock = cli.value();
             AsyncTcpStreamAdapter stream(sock);
             char buf[64]{};
             auto r = co_await stream.read_async(std::span<char>(buf, sizeof(buf)));
+            if (!r) {
+                co_return std::unexpected(r.error());
+            }
             if (r && r.value() > 0) {
                 std::string pong = "PONG-ASYNC";
-                (void)co_await stream.write_async(std::span<const char>(pong.data(), pong.size()));
+                auto w = co_await stream.write_async(std::span<const char>(pong.data(), pong.size()));
+                if (!w) {
+                    co_return std::unexpected(w.error());
+                }
             }
+            co_return std::expected<void,std::error_code>{};
         }
     };
 
-    // Mini server for this example
-    std::thread([=]{
+    std::latch server_ready(1);
+    bool server_started = false;
+    std::error_code server_start_error{};
+    auto server_result = std::expected<void, std::error_code>{};
+
+    std::thread server_thread([&] {
         AsyncTcpServer server;
         auto listen_res = server.start(TcpEndpoint(address, ASYNC_TCP_PORT));
-        if (!listen_res) return;
+        if (!listen_res) {
+            server_start_error = listen_res.error();
+            server_ready.count_down();
+            return;
+        }
 
-        Demo::serve_once(server);
-        
-    // Keep thread alive until the client finishes
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    }).detach();
+        server_started = true;
+        server_ready.count_down();
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
-    std::thread([=]{
-    
-        auto t = Demo::run(address, ASYNC_TCP_PORT);
-        t.start();
-        // auto rc = t.sync_wait();
-        // if (!rc) {
-    //     std::osyncstream(std::cerr) << "[AsyncTCP] Error: " << rc.error().message() << '\n';
-        // }
-    }).join();
+        server_result = run_and_wait(Demo::serve_once(server));
+        server.stop();
+    });
+
+    server_ready.wait();
+    if (!server_started) {
+        std::osyncstream(std::cerr) << "[AsyncTCP-Server] Listen failed: " << server_start_error.message() << '\n';
+        server_thread.join();
+        return;
+    }
+
+    auto client_result = run_and_wait(Demo::run(address, ASYNC_TCP_PORT));
+    if (!client_result) {
+        std::osyncstream(std::cerr) << "[AsyncTCP] Error: " << client_result.error().message() << '\n';
+    }
+
+    server_thread.join();
+    if (!server_result) {
+        std::osyncstream(std::cerr) << "[AsyncTCP-Server] Error: " << server_result.error().message() << '\n';
+    }
 }
 
 // ---------------- Async UDP Beispiel ----------------
 void async_udp_example() {
     struct UdpDemo {
-        static ExpectedTask<void> server(std::string addr, uint16_t port) {
-            auto sock = std::make_shared<AsyncUdpSocket>();
-            UdpEndpoint ep(addr, port, true, port);
-            auto sa = ep.to_sockaddr(true);
-            auto b = sock->bind(sa, sizeof(sa));
-            if (!b) co_return std::unexpected(b.error());
-
+        static ExpectedTask<void> serve_once(std::shared_ptr<AsyncUdpSocket> sock) {
             AsyncUdpStreamAdapter stream(sock);
             char buf[128]{};
 
-            // Simple call — retry logic is handled by the adapter
             auto r = co_await stream.read_async(std::span<char>(buf, sizeof(buf)));
             if (!r) co_return std::unexpected(r.error());
 
@@ -188,7 +205,6 @@ void async_udp_example() {
             std::osyncstream(std::cout) << "[AsyncUDP-Server] Received: " << msg << '\n';
 
             std::string reply = "UDP-ASYNC-PONG";
-            // Einfacher Aufruf - Retry-Logik ist im Adapter
             auto w = co_await stream.write_async(std::span<const char>(reply.data(), reply.size()));
             if (!w) co_return std::unexpected(w.error());
 
@@ -219,10 +235,7 @@ void async_udp_example() {
 
             std::string msg = "UDP-ASYNC-PING";
             std::osyncstream(std::cout) << "[AsyncUDP-Client] Sending: " << msg << '\n';
-    
-            // debug: bind result available (suppressed)
-    
-            // Einfacher Aufruf - Retry-Logik ist im Adapter
+
             auto w = co_await stream.write_async(std::span<const char>(msg.data(), msg.size()));
             if (!w) {
                 std::osyncstream(std::cerr) << "UDP-Client write_async failed: " << w.error().message() << "\n";
@@ -231,7 +244,6 @@ void async_udp_example() {
             std::osyncstream(std::cout) << "[AsyncUDP-Client] Sent: " << msg << '\n';
 
             char buf[128]{};
-            // Einfacher Aufruf - Retry-Logik ist im Adapter
             auto r = co_await stream.read_async(std::span<char>(buf, sizeof(buf)));
             if (!r) co_return std::unexpected(r.error());
             
@@ -240,49 +252,50 @@ void async_udp_example() {
         }
     };
 
-    std::thread([] {
-    // Server coroutine: fire-and-forget (do not call sync_wait here)
-        auto server_task = [](std::string addr, uint16_t port) -> Detached {
-            auto sock = std::make_shared<AsyncUdpSocket>();
-            UdpEndpoint ep(addr, port, true, port);
-            auto sa = ep.to_sockaddr(true);
-            auto b = sock->bind(sa, sizeof(sa));
-            if (!b) co_return;
+    constexpr uint16_t ASYNC_UDP_PORT = UDP_PORT + 10;
+    std::latch server_ready(1);
+    bool server_started = false;
+    std::error_code server_start_error{};
+    auto server_result = std::expected<void, std::error_code>{};
 
-            AsyncUdpStreamAdapter stream(sock);
-            char buf[128]{};
+    std::thread server_thread([&] {
+        auto sock = std::make_shared<AsyncUdpSocket>();
+        UdpEndpoint ep(address, ASYNC_UDP_PORT, true, ASYNC_UDP_PORT);
+        auto sa = ep.to_sockaddr(true);
+        auto bind_res = sock->bind(sa, sizeof(sa));
+        if (!bind_res) {
+            server_start_error = bind_res.error();
+            server_ready.count_down();
+            return;
+        }
 
-            // Simple call — retry logic is handled by the adapter
-            auto r = co_await stream.read_async(std::span<char>(buf, sizeof(buf)));
-            if (!r) co_return;
+        server_started = true;
+        server_ready.count_down();
+        server_result = run_and_wait(UdpDemo::serve_once(std::move(sock)));
+    });
 
-            std::string msg(buf, r.value());
-            std::osyncstream(std::cout) << "[AsyncUDP-Server] Received: " << msg << '\n';
+    server_ready.wait();
+    if (!server_started) {
+        std::osyncstream(std::cerr) << "[AsyncUDP-Server] Bind failed: " << server_start_error.message() << '\n';
+        server_thread.join();
+        return;
+    }
 
-            std::string reply = "UDP-ASYNC-PONG";
-            // Einfacher Aufruf - Retry-Logik ist im Adapter
-            auto w = co_await stream.write_async(std::span<const char>(reply.data(), reply.size()));
-            if (!w) co_return;
-        }(address, UDP_PORT+10);
-        
-    // Keep the thread alive
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    }).detach();
+    auto client_result = run_and_wait(UdpDemo::client(address, ASYNC_UDP_PORT));
+    if (!client_result) {
+        std::osyncstream(std::cerr) << "[AsyncUDP-Client] Error: " << client_result.error().message() << '\n';
+    }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(500)); // Wait a bit longer
-
-     std::thread([] {
-        auto ct = UdpDemo::client(address, UDP_PORT+10);
-        ct.start();
-        // auto cr = ct.sync_wait();
-        // if (!cr) std::osyncstream(std::cerr) << "[AsyncUDP-Client] Error: " << cr.error().message() << '\n';
-    }).join();
+    server_thread.join();
+    if (!server_result) {
+        std::osyncstream(std::cerr) << "[AsyncUDP-Server] Error: " << server_result.error().message() << '\n';
+    }
 }
 
 // ---------------- Echter Async TCP Server (AsyncTcpServer) ----------------
 void async_tcp_server_example() {
     constexpr uint16_t ASYNC_TCP_PORT = TCP_PORT + 10;
-    auto client_handler = [](std::shared_ptr<AsyncTcpSocket> sock) -> Detached {
+    auto client_handler = [](std::shared_ptr<AsyncTcpSocket> sock) -> ExpectedTask<void> {
         AsyncTcpStreamAdapter stream(sock);
         AsyncDataInputStream<AsyncTcpStreamAdapter>  in(stream);
         AsyncDataOutputStream<AsyncTcpStreamAdapter> out(stream);
@@ -291,7 +304,7 @@ void async_tcp_server_example() {
         if (!r_res) {
             std::osyncstream(std::cerr) << "[AsyncTCP-Server] read_string error: "
                                         << r_res.error().message() << '\n';
-            co_return;
+            co_return std::unexpected(r_res.error());
         }
         std::osyncstream(std::cout) << "[AsyncTCP-Server] Received: " << *r_res << '\n';
 
@@ -299,53 +312,60 @@ void async_tcp_server_example() {
         if (!w_res) {
             std::osyncstream(std::cerr) << "[AsyncTCP-Server] write_string error: "
                                         << w_res.error().message() << '\n';
-            co_return;
+            co_return std::unexpected(w_res.error());
         }
         auto f_res = out.flush();
         if (!f_res) {
             std::osyncstream(std::cerr) << "[AsyncTCP-Server] flush error: "
                                         << f_res.error().message() << '\n';
+            co_return std::unexpected(f_res.error());
         }
+        co_return std::expected<void,std::error_code>{};
     };
 
-    auto server_task = [client_handler](std::string addr, uint16_t port) -> ExpectedTask<void> {
+    auto serve_once = [client_handler](AsyncTcpServer& server) -> ExpectedTask<void> {
+        auto accepted = co_await server.accept();
+        if (!accepted) {
+            co_return std::unexpected(accepted.error());
+        }
+
+        auto handled = co_await client_handler(accepted.value());
+        if (!handled) {
+            co_return std::unexpected(handled.error());
+        }
+
+        co_return std::expected<void,std::error_code>{};
+    };
+
+    std::latch server_ready(1);
+    bool server_started = false;
+    std::error_code server_start_error{};
+    auto server_result = std::expected<void, std::error_code>{};
+
+    std::thread server_thread([&] {
         AsyncTcpServer server;
-        auto start_res = server.start(TcpEndpoint(addr, port));
+        auto start_res = server.start(TcpEndpoint(address, ASYNC_TCP_PORT + 1));
         if (!start_res) {
-            std::osyncstream(std::cerr) << "[AsyncTCP-Server] Listen failed: "
-                                        << start_res.error().message() << '\n';
-            co_return std::unexpected(start_res.error());
+            server_start_error = start_res.error();
+            server_ready.count_down();
+            return;
         }
-        std::osyncstream(std::cout) << "[AsyncTCP-Server] Listening on " << addr << ":" << port << '\n';
 
-        for (;;) {
-            auto accepted = co_await server.accept();
-            if (!accepted) {
-                // std::osyncstream(std::cerr) << "[AsyncTCP-Server] Accept error: "
-                //                             << accepted.error().message() << '\n';
-                continue;
-            }
-            client_handler(accepted.value());
-        }
-        // unreachable
-        // co_return {};
-    };
+        std::osyncstream(std::cout) << "[AsyncTCP-Server] Listening on " << address << ":" << (ASYNC_TCP_PORT + 1) << '\n';
+        server_started = true;
+        server_ready.count_down();
+        server_result = run_and_wait(serve_once(server));
+        server.stop();
+    });
 
-    std::thread([&] {
-    // runs indefinitely
-        {
-            auto st = server_task(address, ASYNC_TCP_PORT + 1);
-            auto sr = run_and_wait(std::move(st));
-            if (!sr) {
-                std::osyncstream(std::cerr) << "[AsyncTCP-ServerMain] Error: " << sr.error().message() << '\n';
-            }
-        }
-    }).detach();
+    server_ready.wait();
+    if (!server_started) {
+        std::osyncstream(std::cerr) << "[AsyncTCP-Server] Listen failed: " << server_start_error.message() << '\n';
+        server_thread.join();
+        return;
+    }
 
-    // Test-Client
-    std::thread([&] {
-        constexpr uint16_t ASYNC_TCP_PORT = TCP_PORT + 10;
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    auto client_result = [&]() {
         auto sock = std::make_shared<AsyncTcpSocket>();
         TcpEndpoint ep(address, ASYNC_TCP_PORT+1);
         auto sa = ep.to_sockaddr(false);
@@ -368,16 +388,20 @@ void async_tcp_server_example() {
             auto r_res = co_await in.read_string();
             if (r_res)
                 std::osyncstream(std::cout) << "[AsyncTCP-Client] Received: " << *r_res << '\n';
-            co_return {};
+            co_return std::expected<void,std::error_code>{};
         };
-        {
-            auto ct = client_task();
-            auto cr = run_and_wait(std::move(ct));
-            if (!cr) {
-                std::osyncstream(std::cerr) << "[AsyncTCP-ClientMain] Error: " << cr.error().message() << '\n';
-            }
-        }
-    }).join();
+        auto ct = client_task();
+        return run_and_wait(std::move(ct));
+    }();
+
+    if (!client_result) {
+        std::osyncstream(std::cerr) << "[AsyncTCP-ClientMain] Error: " << client_result.error().message() << '\n';
+    }
+
+    server_thread.join();
+    if (!server_result) {
+        std::osyncstream(std::cerr) << "[AsyncTCP-ServerMain] Error: " << server_result.error().message() << '\n';
+    }
 }
 
 // ---------------- Async Buffered Beispiel ----------------

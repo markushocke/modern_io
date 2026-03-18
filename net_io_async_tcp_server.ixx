@@ -67,6 +67,9 @@ public:
 
     void stop() {
         listening_ = false;
+        if (fd_ != invalid_socket) {
+            EventLoop::instance().deregister(fd_);
+        }
         close_fd();
     }
 

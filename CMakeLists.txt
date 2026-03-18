@@ -27,6 +27,11 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         -Wno-unused-command-line-argument
         -Wno-unknown-warning-option
         -Wno-missing-braces
+        # Clang 18 reports __cpp_concepts=201907L (old draft) in C++ module mode,
+        # which causes GCC's <expected> header guard to fail. Override with the
+        # correct C++20 final value so <expected> is visible in global module fragments.
+        -D__cpp_concepts=202002L
+        -Wno-builtin-macro-redefined
     )
     # add_link_options(-stdlib=libc++)  # ENTFERNT
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")

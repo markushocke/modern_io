@@ -1,0 +1,40 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(Threads REQUIRED)
+
+include("${CMAKE_CURRENT_LIST_DIR}/modern_ioTargets.cmake")
+
+# Restore explicit inter-target module dependencies for installed consumers.
+if(TARGET modern_io::modern_io)
+	set_property(TARGET modern_io::modern_io PROPERTY
+		IMPORTED_CXX_MODULES_LINK_LIBRARIES "Threads::Threads"
+	)
+endif()
+
+if(TARGET modern_io::modern_io_async)
+	set_property(TARGET modern_io::modern_io_async PROPERTY
+		IMPORTED_CXX_MODULES_LINK_LIBRARIES "modern_io::modern_io;Threads::Threads"
+	)
+endif()
+
+if(TARGET modern_io::net_io)
+	set_property(TARGET modern_io::net_io PROPERTY
+		IMPORTED_CXX_MODULES_LINK_LIBRARIES "modern_io::modern_io;Threads::Threads"
+	)
+endif()
+
+if(TARGET modern_io::net_io_async)
+	set_property(TARGET modern_io::net_io_async PROPERTY
+		IMPORTED_CXX_MODULES_LINK_LIBRARIES "modern_io::net_io;modern_io::modern_io_async;Threads::Threads"
+	)
+endif()
+
+if(TARGET modern_io::net_io_adapters)
+	set_property(TARGET modern_io::net_io_adapters PROPERTY
+		IMPORTED_CXX_MODULES_LINK_LIBRARIES "modern_io::modern_io;modern_io::net_io;Threads::Threads"
+	)
+endif()
+
+check_required_components(modern_io)

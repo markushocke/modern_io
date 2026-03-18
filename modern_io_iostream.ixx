@@ -6,8 +6,8 @@ module;
 #include <span>
 #endif
 
-export module modern_io:iostream;
-import :concepts;
+export module modern_io.iostream;
+import modern_io.concepts;
 
 #ifdef _MSC_VER
 import <ostream>;
@@ -49,7 +49,10 @@ public:
      * @param n Number of bytes to write.
      */
     void write(const char* ptr, std::size_t n) {
-        out_.write(ptr, n);
+        // Clear possible error flags so writes to stringstreams that were previously
+        // used for reading don't silently fail.
+        out_.clear();
+        out_.write(ptr, static_cast<std::streamsize>(n));
     }
 
     /**
@@ -57,7 +60,8 @@ public:
      * @param bspan Span of bytes to write.
      */
     void write(std::span<const std::byte> bspan) {
-        out_.write(reinterpret_cast<const char*>(bspan.data()), bspan.size());
+        out_.clear();
+        out_.write(reinterpret_cast<const char*>(bspan.data()), static_cast<std::streamsize>(bspan.size()));
     }
 
     /**
@@ -65,7 +69,8 @@ public:
      * @param cspan Span of chars to write.
      */
     void write(std::span<const char> cspan) {
-        out_.write(cspan.data(), cspan.size());
+        out_.clear();
+        out_.write(cspan.data(), static_cast<std::streamsize>(cspan.size()));
     }
 
     /**
@@ -113,6 +118,9 @@ public:
      * @return Number of bytes actually read.
      */
     std::size_t read(char* ptr, std::size_t n) {
+        // Clear EOF/fail flags so repeated reads after exact-end reads succeed when
+        // there is more buffered data available (common for stringstreams).
+        in_.clear();
         in_.read(ptr, n);
         return static_cast<std::size_t>(in_.gcount());
     }
@@ -139,8 +147,8 @@ public:
      * @brief Checks for end-of-file (EOF) on the underlying std::istream.
      * @return True if EOF has been reached, false otherwise.
      */
-    bool eof() const {
-        return in_.eof();
+    bool eof() {
+        return in_.peek() == std::char_traits<char>::eof();
     }
 
 private:
@@ -209,7 +217,7 @@ public:
      * @brief Checks for end-of-file (EOF) using the iterator.
      * @return True if the iterator has reached the end, false otherwise.
      */
-    bool eof() const {
+    bool eof() {
         return current_ == end_;
     }
 

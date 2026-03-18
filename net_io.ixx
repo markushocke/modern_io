@@ -12,9 +12,11 @@ import net_io.tcp_client;
 import net_io.tcp_server;
 import net_io.udp_endpoint;
 import net_io.udp_transport;
+import net_io.ipc_transport;
 
 export import net_io.tcp_endpoint;
 export import net_io.tcp_client;
 export import net_io.tcp_server;
 export import net_io.udp_endpoint;
 export import net_io.udp_transport;
+export import net_io.ipc_transport;

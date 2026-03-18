@@ -10,7 +10,6 @@ module;
   #include <ws2tcpip.h>
 #else
   #include <arpa/inet.h>    // Provides functions for IP address manipulation (e.g., inet_pton, inet_ntop), multicast, and broadcast.
-  #include <cstdint>
   #include <cstring>
   #include <fcntl.h>        // Provides file control options, including nonblocking sockets (O_NONBLOCK).
   #include <netdb.h>        // Provides network database operations (e.g., getaddrinfo).
@@ -40,6 +39,9 @@ import <utility>;
 import <vector>;
 #endif
 
+import net_io.exceptions;
+export import net_io.exceptions;
+
 // --- Platform-specific helpers ---
 // These helpers ensure correct initialization of platform-specific networking subsystems.
 #if defined(_WIN32)
@@ -65,7 +67,7 @@ namespace detail
     {
       WSADATA wsa;
       if (WSAStartup(MAKEWORD(2,2), &wsa) != 0)
-        throw std::runtime_error("WSAStartup failed");
+        throw net_io::NetworkException("WSAStartup failed", WSAGetLastError());
       std::atexit([]()
       {
         WSACleanup();
@@ -211,6 +213,189 @@ namespace net_io
         break;
       }
     }
+  }
+
+} // namespace net_io
+
+// ---------------------------------------------------------------------------
+// Utility helpers
+// ---------------------------------------------------------------------------
+namespace net_io
+{
+  /**
+   * @brief Allocate a temporary TCP socket bound to port 0 and return the assigned port.
+   *
+   * This is a convenience used by tests to obtain an ephemeral free TCP port.
+   * It creates a socket, binds to INADDR_ANY:0 (or in6addr_any), queries the assigned
+   * port via getsockname and then closes the socket. On error a SocketException is thrown.
+   */
+  export inline uint16_t get_free_tcp_port(int family = AF_INET)
+  {
+#if defined(_WIN32)
+    detail::ensure_wsa();
+#endif
+    sock_t s = ::socket(family, SOCK_STREAM, IPPROTO_TCP);
+    if (s == invalid_socket)
+    {
+#if defined(_WIN32)
+      int err = WSAGetLastError();
+      throw SocketException("get_free_tcp_port: socket() failed", err);
+#else
+      int err = errno;
+      throw SocketException(std::string("get_free_tcp_port: socket() failed: ") + std::strerror(err), err);
+#endif
+    }
+
+    uint16_t port = 0;
+    if (family == AF_INET)
+    {
+      sockaddr_in a{};
+      a.sin_family = AF_INET;
+      a.sin_addr.s_addr = INADDR_ANY;
+      a.sin_port = 0; // let OS pick
+      if (::bind(s, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0)
+      {
+#if defined(_WIN32)
+        int err = WSAGetLastError();
+        ::closesocket(s);
+        throw SocketException("get_free_tcp_port: bind() failed", err);
+#else
+        int err = errno;
+        ::close(s);
+        throw SocketException(std::string("get_free_tcp_port: bind() failed: ") + std::strerror(err), err);
+#endif
+      }
+      sockaddr_in used{};
+      socklen_t len = sizeof(used);
+      if (::getsockname(s, reinterpret_cast<sockaddr*>(&used), &len) == 0)
+        port = ntohs(used.sin_port);
+    }
+    else if (family == AF_INET6)
+    {
+      sockaddr_in6 a{};
+      a.sin6_family = AF_INET6;
+      a.sin6_addr = in6addr_any;
+      a.sin6_port = 0;
+      if (::bind(s, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0)
+      {
+#if defined(_WIN32)
+        int err = WSAGetLastError();
+        ::closesocket(s);
+        throw SocketException("get_free_tcp_port: bind() failed", err);
+#else
+        int err = errno;
+        ::close(s);
+        throw SocketException(std::string("get_free_tcp_port: bind() failed: ") + std::strerror(err), err);
+#endif
+      }
+      sockaddr_in6 used{};
+      socklen_t len = sizeof(used);
+      if (::getsockname(s, reinterpret_cast<sockaddr*>(&used), &len) == 0)
+        port = ntohs(used.sin6_port);
+    }
+    else
+    {
+#if defined(_WIN32)
+      ::closesocket(s);
+#else
+      ::close(s);
+#endif
+      throw SocketException("get_free_tcp_port: unsupported address family", EAFNOSUPPORT);
+    }
+
+#if defined(_WIN32)
+    ::closesocket(s);
+#else
+    ::close(s);
+#endif
+    return port;
+  }
+
+  /**
+   * @brief Allocate a temporary UDP socket bound to port 0 and return the assigned port.
+   *
+   * Similar to get_free_tcp_port but creates a UDP socket (SOCK_DGRAM / IPPROTO_UDP).
+   */
+  export inline uint16_t get_free_udp_port(int family = AF_INET)
+  {
+#if defined(_WIN32)
+    detail::ensure_wsa();
+#endif
+    sock_t s = ::socket(family, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == invalid_socket)
+    {
+#if defined(_WIN32)
+      int err = WSAGetLastError();
+      throw SocketException("get_free_udp_port: socket() failed", err);
+#else
+      int err = errno;
+      throw SocketException(std::string("get_free_udp_port: socket() failed: ") + std::strerror(err), err);
+#endif
+    }
+
+    uint16_t port = 0;
+    if (family == AF_INET)
+    {
+      sockaddr_in a{};
+      a.sin_family = AF_INET;
+      a.sin_addr.s_addr = INADDR_ANY;
+      a.sin_port = 0; // let OS pick
+      if (::bind(s, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0)
+      {
+#if defined(_WIN32)
+        int err = WSAGetLastError();
+        ::closesocket(s);
+        throw SocketException("get_free_udp_port: bind() failed", err);
+#else
+        int err = errno;
+        ::close(s);
+        throw SocketException(std::string("get_free_udp_port: bind() failed: ") + std::strerror(err), err);
+#endif
+      }
+      sockaddr_in used{};
+      socklen_t len = sizeof(used);
+      if (::getsockname(s, reinterpret_cast<sockaddr*>(&used), &len) == 0)
+        port = ntohs(used.sin_port);
+    }
+    else if (family == AF_INET6)
+    {
+      sockaddr_in6 a{};
+      a.sin6_family = AF_INET6;
+      a.sin6_addr = in6addr_any;
+      a.sin6_port = 0;
+      if (::bind(s, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0)
+      {
+#if defined(_WIN32)
+        int err = WSAGetLastError();
+        ::closesocket(s);
+        throw SocketException("get_free_udp_port: bind() failed", err);
+#else
+        int err = errno;
+        ::close(s);
+        throw SocketException(std::string("get_free_udp_port: bind() failed: ") + std::strerror(err), err);
+#endif
+      }
+      sockaddr_in6 used{};
+      socklen_t len = sizeof(used);
+      if (::getsockname(s, reinterpret_cast<sockaddr*>(&used), &len) == 0)
+        port = ntohs(used.sin6_port);
+    }
+    else
+    {
+#if defined(_WIN32)
+      ::closesocket(s);
+#else
+      ::close(s);
+#endif
+      throw SocketException("get_free_udp_port: unsupported address family", EAFNOSUPPORT);
+    }
+
+#if defined(_WIN32)
+    ::closesocket(s);
+#else
+    ::close(s);
+#endif
+    return port;
   }
 
 } // namespace net_io

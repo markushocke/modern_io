@@ -9,8 +9,9 @@ module;
 #include <vector>
 #endif
 
-export module modern_io:file;
-import :concepts;
+export module modern_io.file;
+import modern_io.concepts;
+import modern_io.exceptions;
 
 #ifdef _MSC_VER
 import <fstream>;
@@ -32,8 +33,9 @@ public:
     /// Opens a file for writing (binary).
     explicit FileOutputStream(const std::string& path)
       : out_{ path, std::ios::binary }
+      , path_(path)
     {
-        if (!out_) throw std::runtime_error("Cannot open file for writing");
+        if (!out_) throw FileIOException("Cannot open file for writing", path_);
     }
 
     /// Move constructor
@@ -53,7 +55,7 @@ public:
     void write(const char* data, std::size_t n)
     {
         out_.write(data, n);
-        if (!out_) throw std::runtime_error("Write error");
+        if (!out_) throw FileIOException("Write error", path_);
     }
 
     /// Write a std::span<std::byte>.
@@ -72,14 +74,14 @@ public:
     void flush()
     {
         out_.flush();
-        if (!out_) throw std::runtime_error("Flush error");
+        if (!out_) throw FileIOException("Flush error", path_);
     }
 
     /// Set the position in the stream.
     void seekp(std::streampos pos)
     {
         out_.seekp(pos);
-        if (!out_) throw std::runtime_error("seekp error");
+        if (!out_) throw StreamPositionException("seekp error on file: " + path_);
     }
 
     /// Get the current position in the stream.
@@ -92,6 +94,7 @@ public:
 
 private:
     std::ofstream out_;
+    std::string path_;
 };
 
 /**
@@ -103,8 +106,9 @@ public:
     /// Opens a file for reading (binary).
     explicit FileInputStream(const std::string& path)
       : in_{ path, std::ios::binary }
+      , path_(path)
     {
-        if (!in_) throw std::runtime_error("Cannot open file for reading");
+        if (!in_) throw FileIOException("Cannot open file for reading", path_);
     }
 
     /// Move constructor
@@ -124,7 +128,7 @@ public:
     std::size_t read(char* data, std::size_t n)
     {
         in_.read(data, static_cast<std::streamsize>(n));
-        if (in_.bad()) throw std::runtime_error("Read error");
+        if (in_.bad()) throw FileIOException("Read error", path_);
         return static_cast<std::size_t>(in_.gcount());
     }
 
@@ -144,7 +148,7 @@ public:
     void seekg(std::streampos pos)
     {
         in_.seekg(pos);
-        if (!in_) throw std::runtime_error("seekg error");
+        if (!in_) throw StreamPositionException("seekg error on file: " + path_);
     }
 
     /// Get the current position in the stream.
@@ -163,6 +167,7 @@ public:
 
 private:
     std::ifstream in_;
+    std::string path_;
 };
 static_assert(InputStream<FileInputStream>);
 static_assert(OutputStream<FileOutputStream>);

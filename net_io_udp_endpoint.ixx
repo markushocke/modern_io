@@ -19,6 +19,8 @@ module;
 export module net_io.udp_endpoint;
 import net_io_base;
 export import net_io_base; // sock_t und invalid_socket sichtbar machen
+import net_io.exceptions;
+export import net_io.exceptions;
 
 #ifdef _MSC_VER
 import <string>;
@@ -43,8 +45,8 @@ export namespace net_io
       , bind_local(bind_local_)
       , local_port(lp)
     {
-      if (address.empty())
-        throw std::invalid_argument("UdpEndpoint: remote address empty");
+        if (address.empty())
+          throw net_io::InvalidArgumentException("UdpEndpoint: remote address empty");
     }
 
     sockaddr_storage to_sockaddr(bool passive = false) const {
@@ -61,13 +63,16 @@ export namespace net_io
         &res
       );
       if (err != 0 || !res) {
-        std::string msg = "getaddrinfo failed: ";
+        std::string msg = "getaddrinfo failed";
 #if defined(_WIN32)
-        msg += std::to_string(WSAGetLastError());
+        msg += ": " + std::to_string(WSAGetLastError());
 #else
-        msg += gai_strerror(err);
+        if (err != 0) {
+          msg += ": ";
+          msg += gai_strerror(err);
+        }
 #endif
-        throw std::runtime_error(msg);
+        throw ResolutionException(msg, address);
       }
       sockaddr_storage storage;
       std::memset(&storage, 0, sizeof(storage));

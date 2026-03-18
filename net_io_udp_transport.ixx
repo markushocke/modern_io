@@ -1,7 +1,6 @@
 module;
 
 #ifndef _MSC_VER
-#include <cstdint>
 #include <cstring>
 #include <errno.h>
 #include <iostream>
@@ -80,6 +79,10 @@ public:
       : fd_(fd)
     {}
 
+    explicit UdpTransport(sock_t fd, bool assume_connected) noexcept
+      : fd_(fd), isConnected(assume_connected)
+    {}
+
     // Not copyable: copying a UDP transport is not allowed.
     UdpTransport(const UdpTransport&) = delete;
     UdpTransport& operator=(const UdpTransport&) = delete;
@@ -124,7 +127,7 @@ public:
     /**
      * @brief Open a UDP socket and bind to a local address/port (server mode).
      * @param ep Target endpoint (address, port, bind_local, local_port).
-     * @throws std::runtime_error on error.
+  * @throws SocketException or NetworkException on error.
      *
      * This method creates a UDP socket and binds it to the specified local address and port.
      * It does not connect the socket to a remote peer.
@@ -139,16 +142,16 @@ public:
         socklen_t len   = sizeof(addr_local);
 
         fd_ = ::socket(addr_local.ss_family, SOCK_DGRAM, 0);
-        if (fd_ == invalid_socket)
-        {
+  if (fd_ == invalid_socket)
+  {
 #if defined(_WIN32)
-            int err = WSAGetLastError();
-            throw std::runtime_error("UDP socket() failed: WSA error " + std::to_string(err));
+      int err = WSAGetLastError();
+      throw net_io::SocketException(std::string("UDP socket() failed: WSA error ") + std::to_string(err), err);
 #else
-            int err = errno;
-            throw std::runtime_error("UDP socket() failed: " + std::string(std::strerror(err)));
+      int err = errno;
+      throw net_io::SocketException(std::string("UDP socket() failed: ") + std::strerror(err), err);
 #endif
-        }
+  }
 #if defined(_WIN32)
         if (addr_local.ss_family == AF_INET6)
         {
@@ -162,23 +165,28 @@ public:
             );
         }
 #endif
-        if (::bind(fd_, reinterpret_cast<sockaddr*>(&addr_local), len) != 0)
-        {
+    // On POSIX, ensure IPv6 binds accept IPv4-mapped addresses as well
+    if (addr_local.ss_family == AF_INET6) {
+      int v6only = 0;
+      ::setsockopt(fd_, IPPROTO_IPV6, IPV6_V6ONLY,
+             reinterpret_cast<const char*>(&v6only), sizeof(v6only));
+    }
+  if (::bind(fd_, reinterpret_cast<sockaddr*>(&addr_local), len) != 0)
+  {
 #if defined(_WIN32)
-            int err = WSAGetLastError();
-            throw std::runtime_error("UDP bind() failed: WSA error " + std::to_string(err));
+      int err = WSAGetLastError();
+      throw net_io::SocketException(std::string("UDP bind() failed: WSA error ") + std::to_string(err), err);
 #else
-            int err = errno;
-            throw std::runtime_error("UDP bind() failed: errno " + std::to_string(err) +
-                                    " (" + std::strerror(err) + ")");
+      int err = errno;
+      throw net_io::SocketException(std::string("UDP bind() failed: ") + std::strerror(err), err);
 #endif
-        }
+  }
     }
 
     /**
      * @brief Open a UDP socket, optionally bind to a local port, and connect to a remote address/port (client mode).
      * @param ep Target endpoint (address, port, bind_local, local_port).
-     * @throws std::runtime_error on error.
+  * @throws SocketException or NetworkException on error.
      *
      * This method creates a UDP socket, optionally binds it to a local port, and connects it to a remote peer.
      * After connecting, write() and read() will use the connected peer.
@@ -192,16 +200,16 @@ public:
         socklen_t len    = sizeof(addr_remote);
 
         fd_ = ::socket(addr_remote.ss_family, SOCK_DGRAM, 0);
-        if (fd_ == invalid_socket)
-        {
+  if (fd_ == invalid_socket)
+  {
 #if defined(_WIN32)
-            int err = WSAGetLastError();
-            throw std::runtime_error("UDP socket() failed: WSA error " + std::to_string(err));
+      int err = WSAGetLastError();
+      throw net_io::SocketException(std::string("UDP socket() failed: WSA error ") + std::to_string(err), err);
 #else
-            int err = errno;
-            throw std::runtime_error("UDP socket() failed: " + std::string(std::strerror(err)));
+      int err = errno;
+      throw net_io::SocketException(std::string("UDP socket() failed: ") + std::strerror(err), err);
 #endif
-        }
+  }
 
         // Optional: bind auf lokalen Port
         if (ep.bind_local && ep.local_port != 0)
@@ -224,16 +232,13 @@ public:
                 {
 #if defined(_WIN32)
                     int err = WSAGetLastError();
-                    throw std::runtime_error(
-                      "UDP bind IPv4(port=" + port_str +
-                      ") failed: WSA error " + std::to_string(err)
+                    throw net_io::SocketException(
+                      std::string("UDP bind IPv4(port=") + port_str + ") failed: WSA error " + std::to_string(err), err
                     );
 #else
                     int err = errno;
-                    throw std::runtime_error(
-                      "UDP bind IPv4(port=" + port_str +
-                      ") failed: errno " + std::to_string(err) +
-                      " (" + std::strerror(err) + ")"
+                    throw net_io::SocketException(
+                      std::string("UDP bind IPv4(port=") + port_str + ") failed: " + std::strerror(err), err
                     );
 #endif
                 }
@@ -257,41 +262,37 @@ public:
                 {
 #if defined(_WIN32)
                     int err = WSAGetLastError();
-                    throw std::runtime_error(
-                      "UDP bind IPv6(port=" + port_str +
-                      ") failed: WSA error " + std::to_string(err)
+                    throw net_io::SocketException(
+                      std::string("UDP bind IPv6(port=") + port_str + ") failed: WSA error " + std::to_string(err), err
                     );
 #else
                     int err = errno;
-                    throw std::runtime_error(
-                      "UDP bind IPv6(port=" + port_str +
-                      ") failed: errno " + std::to_string(err) +
-                      " (" + std::strerror(err) + ")"
+                    throw net_io::SocketException(
+                      std::string("UDP bind IPv6(port=") + port_str + ") failed: " + std::strerror(err), err
                     );
 #endif
                 }
             }
             else
             {
-                throw std::runtime_error("UDP bind failed: unsupported address family");
+                throw net_io::NetworkException("UDP bind failed: unsupported address family");
             }
         }
 
-        if (::connect(fd_,
-                      reinterpret_cast<sockaddr*>(&addr_remote),
-                      len) < 0)
-        {
+  if (::connect(fd_,
+          reinterpret_cast<sockaddr*>(&addr_remote),
+          len) < 0)
+  {
 #if defined(_WIN32)
-            int err = WSAGetLastError();
-            throw std::runtime_error("UDP connect() failed: WSA error " + std::to_string(err));
+      int err = WSAGetLastError();
+      throw net_io::SocketException(std::string("UDP connect() failed: WSA error ") + std::to_string(err), err);
 #else
-            int err = errno;
-            throw std::runtime_error(
-              "UDP connect() failed: errno " + std::to_string(err) +
-              " (" + std::strerror(err) + ")"
-            );
+      int err = errno;
+      throw net_io::SocketException(std::string("UDP connect() failed: ") + std::strerror(err), err);
 #endif
-        }
+  }
+    // Mark as connected for recv/send pairing
+    isConnected = true;
     }
 
     /**
@@ -385,8 +386,8 @@ public:
      * If from_addr and from_len are provided, they will be filled with the sender's address.
      * If not provided, the sender address is ignored.
      */
-    std::size_t read(char* data, std::size_t size,
-                     sockaddr_storage* from_addr = nullptr, socklen_t* from_len = nullptr)
+  std::size_t read(char* data, std::size_t size,
+           sockaddr_storage* from_addr = nullptr, socklen_t* from_len = nullptr)
     {
 #if defined(_WIN32)
         sockaddr_storage from{};
@@ -404,25 +405,61 @@ public:
         if (from_len)  *from_len  = fromlen;
         return static_cast<std::size_t>(ret);
 #else
-        if (fd_ == invalid_socket) {
-            std::cerr << "[UdpTransport] read() called with invalid fd_! (socket already closed or never opened)" << std::endl;
-            throw SocketException("UDP recvfrom failed: socket not open", EBADF);
+    if (fd_ == invalid_socket) {
+      throw SocketException("UDP recvfrom failed: socket not open", EBADF);
+    }
+    // If the socket was connected via open_connect(), use recv() semantics.
+    if (isConnected) {
+      // Connected socket: receive from the connected peer.
+#if defined(_WIN32)
+      int ret = ::recv(fd_, data, static_cast<int>(size), 0);
+      if (ret == SOCKET_ERROR) {
+        int err = WSAGetLastError();
+        throw SocketException("UDP recv failed", err);
+      }
+      // If caller requested the peer address, fill it via getpeername
+      if ((from_addr || from_len) && fd_ != invalid_socket) {
+        sockaddr_storage peer{};
+        socklen_t plen = sizeof(peer);
+        if (::getpeername(fd_, reinterpret_cast<sockaddr*>(&peer), &plen) == 0) {
+          if (from_addr) *from_addr = peer;
+          if (from_len) *from_len = plen;
         }
-        sockaddr_storage from{};
-        socklen_t    fromlen = sizeof(from);
-        ssize_t ret = ::recvfrom(
-            fd_, data, size, 0,
-            reinterpret_cast<sockaddr*>(&from), &fromlen
-        );
-        if (ret < 0)
-        {
-            int err = errno;
-            std::cerr << "[UdpTransport] recvfrom failed: errno=" << err << " (" << std::strerror(err) << "), fd_=" << fd_ << std::endl;
-            throw SocketException("UDP recvfrom failed", err);
+      }
+      return static_cast<std::size_t>(ret);
+#else
+      ssize_t ret = ::recv(fd_, data, size, 0);
+      if (ret < 0) {
+        int err = errno;
+        throw SocketException("UDP recv failed", err);
+      }
+      if ((from_addr || from_len) && fd_ != invalid_socket) {
+        sockaddr_storage peer{};
+        socklen_t plen = sizeof(peer);
+        if (::getpeername(fd_, reinterpret_cast<sockaddr*>(&peer), &plen) == 0) {
+          if (from_addr) *from_addr = peer;
+          if (from_len) *from_len = plen;
         }
-        if (from_addr) *from_addr = from;
-        if (from_len)  *from_len  = fromlen;
-        return static_cast<std::size_t>(ret);
+      }
+      return static_cast<std::size_t>(ret);
+#endif
+    }
+
+    // Unconnected socket: use recvfrom to obtain sender address.
+    sockaddr_storage from{};
+    socklen_t    fromlen = sizeof(from);
+    ssize_t ret = ::recvfrom(
+        fd_, data, size, 0,
+        reinterpret_cast<sockaddr*>(&from), &fromlen
+    );
+    if (ret < 0)
+    {
+      int err = errno;
+      throw SocketException("UDP recvfrom failed", err);
+    }
+    if (from_addr) *from_addr = from;
+    if (from_len)  *from_len  = fromlen;
+    return static_cast<std::size_t>(ret);
 #endif
     }
 
@@ -441,11 +478,11 @@ public:
         if(isBoundLocal)
         {
 #if defined(_WIN32)
-        ::sendto(fd_, data, static_cast<int>(size), 0,
-                  reinterpret_cast<const sockaddr*>(&to_addr), to_len);
+            ::sendto(fd_, data, static_cast<int>(size), 0,
+                     reinterpret_cast<const sockaddr*>(&to_addr), to_len);
 #else
-        ::sendto(fd_, data, size, 0,
-                 reinterpret_cast<const sockaddr*>(&to_addr), to_len);
+            ::sendto(fd_, data, size, 0,
+                     reinterpret_cast<const sockaddr*>(&to_addr), to_len);
 #endif
         }
         else
@@ -464,9 +501,9 @@ public:
     void write(const char* data, std::size_t size) noexcept
     {
 #if defined(_WIN32)
-        ::send(fd_, data, static_cast<int>(size), 0);
+    ::send(fd_, data, static_cast<int>(size), 0);
 #else
-        ::send(fd_, data, size, 0);
+    ::send(fd_, data, size, 0);
 #endif
     }
 
@@ -525,6 +562,7 @@ public:
 private:
     sock_t fd_{ invalid_socket }; ///< The socket handle.
     bool isBoundLocal{ false };    ///< Whether the socket is bound to a local address.
+  bool isConnected{ false };     ///< Whether the socket has been connected via open_connect
 };
 
 } // namespace net_io

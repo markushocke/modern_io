@@ -41,7 +41,9 @@ import <optional>;
 import net_io_base;
 import net_io_concepts;
 import net_io.tcp_endpoint;
+import net_io.exceptions;
 export import net_io_base; // Export sock_t and invalid_socket
+export import net_io.exceptions;
 
 export namespace net_io
 {
@@ -122,10 +124,12 @@ export namespace net_io
     ~TcpClient()
     {
       // Niemals Exception im Destruktor werfen!
+        // Never throw exceptions from destructors!
       try {
         close();
       } catch (...) {
-        // Fehler ignorieren, niemals Exception propagieren
+  // Ignore errors; never propagate exceptions
+          // Ignore errors here; never propagate exceptions
       }
     }
 
@@ -139,7 +143,7 @@ export namespace net_io
     void open()
     {
       if (!ep_)
-        throw SocketException("open() failed: no endpoint set", 0);
+        throw ConnectionException("Connection failed: no endpoint set", 0);
 
 #if defined(_WIN32)
       detail::ensure_wsa();
@@ -151,7 +155,7 @@ export namespace net_io
       if (fd_ == invalid_socket)
       {
         std::cerr << "[TcpClient] socket() failed, fd_=" << fd_ << std::endl;
-        throw SocketException("socket() failed", errno);
+        throw NetworkException("Failed to create socket", errno);
       }
 
       if (::connect(
@@ -168,10 +172,9 @@ export namespace net_io
         ::close(fd_);
 #endif
         fd_ = invalid_socket;
-        std::cerr << "[TcpClient] connect() failed, fd_=" << fd_ << std::endl;
-        throw SocketException("connect() failed", err);
+        std::string endpoint_str = ep_->address + ":" + std::to_string(ep_->port);
+        throw ConnectionException("Failed to connect", err, endpoint_str);
       }
-      std::cerr << "[TcpClient] open() success, fd_=" << fd_ << std::endl;
     }
 
     /**
@@ -214,16 +217,16 @@ export namespace net_io
       if (fd_ == invalid_socket)
       {
         std::cerr << "[TcpClient] write() failed: fd_ is invalid!" << std::endl;
-        throw SocketException("write() failed: socket not open", 0);
+        throw NetworkException("Write failed: socket not open", 0);
       }
 #if defined(_WIN32)
       int ret = ::send(fd_, data, static_cast<int>(size), 0);
       if (ret < 0 || ret != static_cast<int>(size))
-        throw SocketException("send() failed", WSAGetLastError());
+        throw NetworkException("Send failed", WSAGetLastError());
 #else
       ssize_t ret = ::write(fd_, data, size);
       if (ret < 0 || static_cast<std::size_t>(ret) != size)
-        throw SocketException("write() failed", errno);
+        throw NetworkException("Write failed", errno);
 #endif
     }
 
@@ -274,20 +277,6 @@ export namespace net_io
     sock_t native_handle() const noexcept
     {
       return fd_;
-    }
-
-    /**
-     * @brief Set the socket to nonblocking mode.
-     * @param enable True to enable nonblocking mode, false to disable.
-     *
-     * Example:
-     * @code
-     * client.set_nonblocking(true);
-     * @endcode
-     */
-    void set_nonblocking(bool enable)
-    {
-      set_socket_option(fd_, SocketOption::NonBlocking, enable ? 1 : 0);
     }
 
     /**

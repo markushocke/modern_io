@@ -39,8 +39,9 @@ import <bit>;
 import <future>;
 #endif
 
-export import :concepts;
-export import :file;
-export import :data;
-export import :buffered;
-export import :iostream;
+export import modern_io.exceptions;
+export import modern_io.concepts;
+export import modern_io.file;
+export import modern_io.data;
+export import modern_io.buffered;
+export import modern_io.iostream;

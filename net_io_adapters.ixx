@@ -12,6 +12,7 @@ module;
 #else
   #include <sys/socket.h>
   #include <netinet/in.h>
+    #include <netdb.h>
 #endif
 
 #ifndef _MSC_VER
@@ -87,7 +88,7 @@ export namespace net_io_adapters
     {
     public:
         /**
-         * @brief Konstruktor: shared_ptr statt Referenz!
+         * @brief Constructor: uses shared_ptr instead of reference!
          */
         explicit TransportSink(std::shared_ptr<T> t) noexcept
             : t_(std::move(t))
@@ -151,12 +152,12 @@ export namespace net_io_adapters
             return t_->write_to(std::forward<Args>(args)...);
         }
 
-        // Zugriff auf das shared_ptr (z.B. für native_handle)
+        // Access to the shared_ptr (e.g. for native_handle)
         std::shared_ptr<T>& underlying() noexcept { return t_; }
         const std::shared_ptr<T>& underlying() const noexcept { return t_; }
 
     private:
-        std::shared_ptr<T> t_; ///< shared_ptr statt Referenz!
+        std::shared_ptr<T> t_; ///< shared_ptr instead of reference!
     };
 
     /**
@@ -179,7 +180,7 @@ export namespace net_io_adapters
     {
     public:
         /**
-         * @brief Konstruktor: shared_ptr statt Referenz!
+         * @brief Constructor: shared_ptr instead of reference!
          */
         explicit TransportSource(std::shared_ptr<T> t) noexcept
             : t_(std::move(t))
@@ -255,11 +256,11 @@ export namespace net_io_adapters
         const std::shared_ptr<T>& underlying() const noexcept { return t_; }
 
     private:
-        std::shared_ptr<T> t_; ///< shared_ptr statt Referenz!
+        std::shared_ptr<T> t_; ///< shared_ptr instead of reference!
     };
 
     // Adapter for UDP datagram output, buffers until flush
-    template<net_io_concepts::Writable T> // <--- angepasst
+    template<net_io_concepts::Writable T>
     class DatagramSink
     {
     public:
@@ -335,6 +336,7 @@ export namespace net_io_adapters
         {
             if (!buffer_.empty())
             {
+                // Default flush uses connected write (client/connected sockets).
                 transport_->write(buffer_.data(), buffer_.size());
                 buffer_.clear();
             }
@@ -363,20 +365,32 @@ export namespace net_io_adapters
             transport_->write_to(data, size, to_addr, to_len);
         }
 
+        /**
+         * Flush buffer directly to a specific peer (server mode).
+         * This uses the transport's write_to() implementation (sendto).
+         */
+        void flush_to(const sockaddr_storage& to_addr, socklen_t to_len) noexcept
+        {
+            if (!buffer_.empty()) {
+                transport_->write_to(buffer_.data(), buffer_.size(), to_addr, to_len);
+                buffer_.clear();
+            }
+        }
+
     private:
         std::shared_ptr<T> transport_;              // Reference to the underlying transport object
         std::vector<char> buffer_;  // Buffer for accumulating outgoing datagram data
     };
 
     // Factory function for DatagramSink
-    template<net_io_concepts::Writable T> // <--- angepasst
+    template<net_io_concepts::Writable T>
     DatagramSink<T> make_datagram_sink(std::shared_ptr<T> t)
     {
         return DatagramSink<T>(*t);
     }
 
     // Adapter for UDP datagram input, reads one datagram at a time
-    template<net_io_concepts::Readable T> // <--- angepasst
+    template<net_io_concepts::Readable T>
     class DatagramSource
     {
     public:
@@ -416,8 +430,60 @@ export namespace net_io_adapters
         // Addition: read with sender address (for DuplexDatagramStream)
         std::size_t read(char* data, std::size_t size, sockaddr_storage* from, socklen_t* fromlen)
         {
-            // Clear the buffer and read a datagram directly from the transport
-            return transport_->read(data, size, from, fromlen);
+            // If we have leftover data from a previous datagram, consume it first
+            if (pos_ < buffer_.size()) {
+                std::size_t chunk = std::min(size, buffer_.size() - pos_);
+                std::memcpy(data, buffer_.data() + pos_, chunk);
+                pos_ += chunk;
+                // If we've consumed the whole buffered datagram, clear it
+                if (pos_ >= buffer_.size()) {
+                    buffer_.clear();
+                    pos_ = 0;
+                    // mark that the saved from address is consumed
+                    has_last_from_ = false;
+                }
+                // return the saved from address if requested
+                if (fromlen && has_last_from_) {
+                    *fromlen = last_from_len_;
+                    if (from) *from = last_from_;
+                }
+                return chunk;
+            }
+
+            // Fetch next datagram into internal buffer
+            buffer_.resize(max_packet_);
+            socklen_t flen = sizeof(sockaddr_storage);
+            socklen_t* plen = fromlen ? fromlen : &flen;
+            sockaddr_storage from_tmp{};
+            socklen_t plen_tmp = flen;
+            auto got = transport_->read(buffer_.data(), buffer_.size(), &from_tmp, &plen_tmp);
+            if (got == 0) return 0;
+            buffer_.resize(got);
+            pos_ = 0;
+            // store the sender address for subsequent reads from this datagram only if valid
+            const sockaddr* saddr_tmp = reinterpret_cast<const sockaddr*>(&from_tmp);
+            int family_tmp = saddr_tmp->sa_family;
+            if ((family_tmp == AF_INET || family_tmp == AF_INET6) && plen_tmp > 0) {
+                last_from_ = from_tmp;
+                last_from_len_ = plen_tmp;
+                has_last_from_ = true;
+            } else {
+                has_last_from_ = false;
+            }
+
+            // Deliver up to 'size' bytes from the buffered datagram
+            std::size_t chunk = std::min(size, buffer_.size() - pos_);
+            std::memcpy(data, buffer_.data() + pos_, chunk);
+            pos_ += chunk;
+            // If we've consumed the whole datagram, reset buffer for next datagram
+            if (pos_ >= buffer_.size()) {
+                buffer_.clear();
+                pos_ = 0;
+                has_last_from_ = false;
+            }
+            if (fromlen) *fromlen = last_from_len_;
+            if (from) *from = last_from_;
+            return chunk;
         }
 
         bool eof() const noexcept
@@ -430,6 +496,9 @@ export namespace net_io_adapters
         std::shared_ptr<T> transport_;
         std::vector<char> buffer_;
         std::size_t pos_;
+        bool has_last_from_ = false;
+        sockaddr_storage last_from_{};
+        socklen_t last_from_len_ = 0;
     };
 
     // Factory function for DatagramSource
@@ -465,7 +534,14 @@ export namespace net_io_adapters
             // Source must support read(char*, std::size_t, sockaddr_storage*, socklen_t*)
             std::size_t n = src_.read(data, size, &from, &fromlen);
             if (n > 0)
-                last_peer_ = std::make_pair(from, fromlen);
+            {
+                // Only record a peer address if it appears valid (AF_INET/AF_INET6)
+                const sockaddr* saddr = reinterpret_cast<const sockaddr*>(&from);
+                int family = saddr->sa_family;
+                if ((family == AF_INET || family == AF_INET6) && fromlen > 0) {
+                    last_peer_ = std::make_pair(from, fromlen);
+                }
+            }
             return n;
         }
         std::size_t read(std::span<std::byte> data)
@@ -477,13 +553,16 @@ export namespace net_io_adapters
             return read(data.data(), data.size());
         }
 
-        // Write: sends to the last stored address
+        // Write: sends to the last stored address. If no last peer is known,
+        // try the sink's connected write (useful for client/connected sockets).
         void write(const char* data, std::size_t size)
         {
             std::lock_guard<std::mutex> lock(mtx_);
-            // if (!last_peer_)
-            //     throw std::runtime_error("No peer address known for write");
-            sink_.write_to(data, size, last_peer_->first, last_peer_->second);
+            // Always buffer the write; actual send happens on flush().
+            // This avoids mismatched send/sendto vs recv/recvfrom usage when
+            // callers alternate between connected and unconnected operations.
+            // Append to internal buffer via sink's write (DatagramSink buffers internally).
+            sink_.write(data, size);
         }
         void write(std::span<const std::byte> data)
         {
@@ -497,9 +576,41 @@ export namespace net_io_adapters
         void flush()
         {
             std::lock_guard<std::mutex> lock(mtx_);
-            if constexpr (requires { sink_.flush(); }) 
-            {
-                sink_.flush();
+            // Prefer flushing to a remembered peer when valid; otherwise do a normal flush.
+            if (last_peer_) {
+                if (!safe_flush_to(last_peer_.value().first, last_peer_.value().second)) {
+                    // If safe_flush_to declined to call flush_to, fallback to normal flush
+                    if constexpr (requires { sink_.flush(); }) {
+                        sink_.flush();
+                    }
+                }
+            } else {
+                if constexpr (requires { sink_.flush(); }) {
+                    sink_.flush();
+                }
+            }
+        }
+
+    private:
+        // Returns true if flush_to was invoked, false if it was skipped.
+        bool safe_flush_to(const endpoint_type& addr, socklen_t addrlen) noexcept
+        {
+            const sockaddr* saddr = reinterpret_cast<const sockaddr*>(&addr);
+            int family = saddr->sa_family;
+            if (!((family == AF_INET) || (family == AF_INET6))) {
+                return false;
+            }
+            if (addrlen == 0) return false;
+            if constexpr (requires { sink_.flush_to(std::declval<const endpoint_type&>(), std::declval<socklen_t>()); }) {
+                try {
+                    sink_.flush_to(addr, addrlen);
+                } catch (...) {
+                    // swallow exceptions in noexcept context
+                }
+                return true;
+            } else {
+                // No flush_to available on sink: indicate we did not perform a peer-targeted flush.
+                return false;
             }
         }
 
@@ -762,13 +873,13 @@ export namespace net_io_adapters
         }
         && (!UdpEndpointLike<T>);
 
-    // --- Generische Factory für beliebige Transporttypen (Client) ---
+    // --- Generic factory for arbitrary transport types (Client) ---
     /**
-     * @brief Erzeugt einen SharedStream für beliebige Transporttypen.
-     *        Die Factory erkennt TCP/UDP/sonstige Transports automatisch.
-     *        Die Rückgabe ist immer ein SharedStream, der InputStream/OutputStream erfüllt.
+     * @brief Creates a SharedStream for arbitrary transport types.
+     *        The factory automatically detects TCP/UDP/other transports.
+     *        The return value is always a SharedStream that satisfies InputStream/OutputStream.
      *
-     * Beispiel:
+     * Example:
      *   auto stream = make_stream(TcpEndpoint{...});
      *   auto stream = make_stream(UdpEndpoint{...});
      *   auto stream = make_stream(std::make_shared<MyTransport>(...));
@@ -778,7 +889,7 @@ export namespace net_io_adapters
     {
         using T = std::decay_t<EndpointOrTransport>;
         if constexpr (TcpEndpointLike<T>) {
-            // TCP Endpoint: Erzeuge TcpClient, öffne Verbindung, adaptiere
+            // TCP Endpoint: create TcpClient, open connection, adapt
             auto client = std::make_shared<net_io::TcpClient>(std::forward<EndpointOrTransport>(ep_or_transport));
             client->open();
             auto src  = TransportSource<net_io::TcpClient>(client);
@@ -787,16 +898,16 @@ export namespace net_io_adapters
             auto duplex = std::make_shared<DuplexType>(std::move(src), std::move(sink));
             return SharedStream<DuplexType>(duplex);
         } else if constexpr (UdpEndpointLike<T>) {
-            // UDP Endpoint: Erzeuge UdpTransport, öffne Verbindung, adaptiere
+            // UDP Endpoint: create UdpTransport, open connection, adapt
             auto udp = std::make_shared<net_io::UdpTransport>();
             if (ep_or_transport.bind_local)
             {
-                // Server-Modus: bind auf lokalen Port
+                // Server mode: bind to local port
                 udp->open_bind(std::forward<EndpointOrTransport>(ep_or_transport));
             }
             else
             {
-                // Client-Modus: connect zu Ziel
+                // Client mode: connect to destination
                 udp->open_connect(std::forward<EndpointOrTransport>(ep_or_transport));
             }
             auto src  = DatagramSource<net_io::UdpTransport>(udp);
@@ -807,7 +918,7 @@ export namespace net_io_adapters
         } else if constexpr (std::is_pointer_v<T> ||
                              std::is_same_v<T, std::shared_ptr<std::decay_t<decltype(*ep_or_transport)>>>)
         {
-            // Für shared_ptr<T> oder T* (z.B. eigene Transportklassen)
+            // For shared_ptr<T> or T* (e.g. custom transport classes)
             using U = std::remove_pointer_t<T>;
             std::shared_ptr<U> ptr = std::is_pointer_v<T> ? std::shared_ptr<U>(ep_or_transport) : ep_or_transport;
             auto src  = TransportSource<U>(ptr);
@@ -816,7 +927,7 @@ export namespace net_io_adapters
             auto duplex = std::make_shared<DuplexType>(std::move(src), std::move(sink));
             return SharedStream<DuplexType>(duplex);
         } else {
-            // Für beliebige Transport-Objekte (by value/ref)
+            // For arbitrary transport objects (by value/ref)
             auto obj = std::make_shared<T>(std::forward<EndpointOrTransport>(ep_or_transport));
             auto src  = TransportSource<T>(obj);
             auto sink = TransportSink<T>(obj);
@@ -854,7 +965,7 @@ export namespace net_io_adapters
         return SharedStream<DuplexWithKeepalive>(duplex);
     }
 
-    // --- Executor concept und Beispiel-Executor ---
+    // --- Executor concept and example executor ---
     /**
      * @brief Concept for Executor: Must support execute(std::function<void()>).
      */
@@ -875,7 +986,7 @@ export namespace net_io_adapters
 
     /**
      * @brief Generic server factory that submits a task to the executor for each new connection.
-     *        Die Callback- und StreamBuilder-Parameter stehen jetzt vorne, damit Template-Deduktion funktioniert.
+     *        The callback and stream builder parameters are now first for template deduction.
      */
     template<
         typename Callback,
@@ -912,14 +1023,14 @@ export namespace net_io_adapters
 
     /**
      * @brief Convenience function to run a TCP server using run_server_with_executor.
-     *        Behält die Flexibilität bzgl. Executor, Callback und StreamBuilder.
-     * @tparam Callback        Typ des Client-Callbacks
-     * @tparam Executor        Typ des Executors
-     * @tparam StreamBuilder   Typ des Stream-Builders
-     * @param executor         Executor-Instanz
-     * @param on_client        Callback für neue Clients
-     * @param running          Atomic-Flag zum Stoppen des Servers
-     * @param server_args      Argumente für den TcpServer-Konstruktor
+     *        Retains flexibility regarding executor, callback, and stream builder.
+     * @tparam Callback        Type of client callback
+     * @tparam Executor        Type of executor
+     * @tparam StreamBuilder   Type of stream builder
+     * @param executor         Executor instance
+     * @param on_client        Callback for new clients
+     * @param running          Atomic flag to stop the server
+     * @param server_args      Arguments for the TcpServer constructor
      */
     template<
         typename Callback,

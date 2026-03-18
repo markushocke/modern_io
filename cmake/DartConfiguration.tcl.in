@@ -1,0 +1,2 @@
+# Minimal DartConfiguration.tcl for local builds
+set(CTEST_SITE_NAME "Local")

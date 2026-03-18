@@ -22,6 +22,8 @@ module;
 export module net_io.tcp_endpoint;
 import net_io_base;
 export import net_io_base; // Make sock_t and invalid_socket visible to users of this module.
+import net_io.exceptions;
+export import net_io.exceptions;
 
 #ifdef _MSC_VER
 import <string>;
@@ -63,7 +65,7 @@ export namespace net_io
     {
       if (address.empty())
       {
-        throw std::invalid_argument("TcpEndpoint: empty address");
+        throw net_io::InvalidArgumentException("TcpEndpoint: empty address");
       }
     }
 
@@ -76,7 +78,7 @@ export namespace net_io
      * @param passive If true, the address is resolved for binding (AI_PASSIVE).
      *                If false, the address is resolved for connecting.
      * @return sockaddr_storage structure representing the endpoint.
-     * @throws std::runtime_error if address resolution fails.
+  * @throws ResolutionException if address resolution fails.
      *
      * Example:
      * @code
@@ -100,13 +102,16 @@ export namespace net_io
       );
       if (err != 0 || !res)
       {
-        std::string msg = "getaddrinfo failed: ";
+        std::string msg = "getaddrinfo failed";
 #if defined(_WIN32)
-        msg += std::to_string(WSAGetLastError());
+        msg += ": " + std::to_string(WSAGetLastError());
 #else
-        msg += gai_strerror(err);
+        if (err != 0) {
+          msg += ": ";
+          msg += gai_strerror(err);
+        }
 #endif
-        throw std::runtime_error(msg);
+        throw ResolutionException(msg, address);
       }
 
       sockaddr_storage storage;

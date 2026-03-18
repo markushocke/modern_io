@@ -1,7 +1,6 @@
 module;
 
 // System headers (sorted)
-#include <cstdint>
 #include <cstring>
 #include <exception>
 #include <fcntl.h>        // For nonblocking sockets
@@ -14,7 +13,7 @@ module;
   #define NOMINMAX
   #include <winsock2.h>
   #include <ws2tcpip.h>
-  #pragma comment(lib, "ws2_32.lib") // Nur wenn nötig
+  #pragma comment(lib, "ws2_32.lib") // Only if needed
 #else
   #include <netdb.h>
   #include <sys/socket.h>
@@ -38,7 +37,9 @@ import <stdexcept>;
 
 // Module imports (sorted)
 import net_io_base;
-import net_io_concepts; // <--- hinzugefügt
+import net_io_concepts; // <--- added
+import net_io.exceptions;
+export import net_io.exceptions;
 import net_io.tcp_client;
 import net_io.tcp_endpoint;
 export import net_io_base; // Export sock_t and invalid_socket
@@ -59,7 +60,7 @@ export namespace net_io
       : endpoint_(ep)
     {
         if (endpoint_.address.empty())
-            throw std::invalid_argument("TcpServer: endpoint address empty");
+            throw net_io::InvalidArgumentException("TcpServer: endpoint address empty");
     }
 
     /// Start and bind to the stored endpoint
@@ -85,7 +86,16 @@ export namespace net_io
           &res
         );
         if (err != 0 || !res)
-          throw std::runtime_error("getaddrinfo failed");
+        {
+          std::string msg = "getaddrinfo failed";
+#if !defined(_WIN32)
+          if (err != 0) {
+            msg += ": ";
+            msg += gai_strerror(err);
+          }
+#endif
+          throw ResolutionException(msg, "0.0.0.0");
+        }
 
         for (auto rp = res; rp; rp = rp->ai_next)
         {
@@ -137,7 +147,7 @@ export namespace net_io
       }
 
       if (listen_fds_.empty())
-        throw std::runtime_error("Failed to bind any socket");
+        throw BindException("Failed to bind to any address", errno, "0.0.0.0", endpoint_.port);
     }
 
     /// Set all listeners to nonblocking mode
@@ -194,10 +204,10 @@ export namespace net_io
           tvptr
         );
         if (ready < 0)
-          throw SocketException("select failed", errno);
+          throw NetworkException("select failed", errno);
 
         if (ready == 0 && accept_timeout_ms_ >= 0)
-          throw SocketException("accept timeout", 0);
+          throw TimeoutException("Accept timeout");
 
         for (auto fd : listen_fds_)
         {

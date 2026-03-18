@@ -7,8 +7,8 @@ on:
     branches: [ "main" ]
 
 jobs:
-  linux-clang:
-    name: Linux Clang Build And Test
+  linux-clang-full:
+    name: Linux Clang Full Build And Test
     runs-on: ubuntu-latest
 
     steps:
@@ -23,8 +23,8 @@ jobs:
       run: |
         cmake -S "$GITHUB_WORKSPACE" -B "$GITHUB_WORKSPACE/build" \
           -G Ninja \
-          -DCMAKE_C_COMPILER=clang \
-          -DCMAKE_CXX_COMPILER=clang++ \
+          -DCMAKE_C_COMPILER=/usr/bin/clang \
+          -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
           -DCMAKE_BUILD_TYPE=Release
 
     - name: Build
@@ -33,6 +33,98 @@ jobs:
     - name: Test
       working-directory: ${{ github.workspace }}/build
       run: ctest --output-on-failure -j 4
+
+  linux-clang-async-focus:
+    name: Linux Clang Async Focus
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install toolchain
+      run: |
+        sudo apt update
+        sudo apt install -y ninja-build clang
+
+    - name: Configure
+      run: |
+        cmake -S "$GITHUB_WORKSPACE" -B "$GITHUB_WORKSPACE/build" \
+          -G Ninja \
+          -DCMAKE_C_COMPILER=/usr/bin/clang \
+          -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+          -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build Async Targets
+      run: |
+        cmake --build "$GITHUB_WORKSPACE/build" --target \
+          test_net_io_concepts_static \
+          test_net_io_concepts_async \
+          test_net_io_async_tcp \
+          test_net_io_async_tcp_multi \
+          test_net_io_async_udp \
+          test_net_io_async_udp_multi \
+          test_net_io_event_loop \
+          test_net_io_io_task
+
+    - name: Run Async Focus Tests
+      working-directory: ${{ github.workspace }}
+      run: |
+        timeout 30s ./build/tests/net_io/test_net_io_concepts_static
+        timeout 30s ./build/tests/net_io/test_net_io_concepts_async
+        timeout 30s ./build/tests/net_io/test_net_io_async_tcp
+        timeout 30s ./build/tests/net_io/test_net_io_async_udp
+        timeout 30s ./build/tests/net_io/test_net_io_async_udp_multi
+        timeout 30s ./build/tests/net_io/test_net_io_event_loop
+        timeout 30s ./build/tests/net_io/test_net_io_io_task
+        for i in $(seq 1 25); do
+          timeout 30s ./build/tests/net_io/test_net_io_async_tcp_multi --gtest_filter=AsyncTcpMultiTest.AcceptMultipleClients
+        done
+
+  linux-clang-asan-async:
+    name: Linux Clang ASAN Async
+    runs-on: ubuntu-latest
+    env:
+      ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:strict_init_order=1:check_initialization_order=1
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install toolchain
+      run: |
+        sudo apt update
+        sudo apt install -y ninja-build clang
+
+    - name: Configure ASAN
+      run: |
+        cmake -S "$GITHUB_WORKSPACE" -B "$GITHUB_WORKSPACE/build_asan" \
+          -G Ninja \
+          -DCMAKE_C_COMPILER=/usr/bin/clang \
+          -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+          -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+          -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address" \
+          -DCMAKE_SHARED_LINKER_FLAGS="-fsanitize=address"
+
+    - name: Build Async Targets (ASAN)
+      run: |
+        cmake --build "$GITHUB_WORKSPACE/build_asan" --target \
+          test_net_io_async_tcp \
+          test_net_io_async_tcp_multi \
+          test_net_io_async_udp \
+          test_net_io_async_udp_multi \
+          test_net_io_event_loop \
+          test_net_io_io_task
+
+    - name: Run Async Tests (ASAN)
+      working-directory: ${{ github.workspace }}
+      run: |
+        timeout 45s ./build_asan/tests/net_io/test_net_io_async_tcp
+        timeout 45s ./build_asan/tests/net_io/test_net_io_async_tcp_multi
+        timeout 45s ./build_asan/tests/net_io/test_net_io_async_udp
+        timeout 45s ./build_asan/tests/net_io/test_net_io_async_udp_multi
+        timeout 45s ./build_asan/tests/net_io/test_net_io_event_loop
+        timeout 45s ./build_asan/tests/net_io/test_net_io_io_task
 
   windows-msvc-sync:
     name: Windows MSVC Sync Build

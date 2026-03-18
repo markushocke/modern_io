@@ -29,7 +29,7 @@ class GenericAwaiterImpl {
     Registrar reg_;
     std::expected<Ret,std::error_code> result_;
     bool ready_{false};
-    std::shared_ptr<void> self_;
+    std::weak_ptr<void> self_;
     bool is_write_{false};
 public:
     GenericAwaiterImpl(int fd, Op op, Registrar reg, bool is_write)
@@ -47,9 +47,10 @@ public:
     bool await_ready() noexcept { return false; }
 
     bool await_suspend(std::coroutine_handle<> h) {
+        auto owner = self_.lock();
         if (net_io::EventLoop::instance().debug_enabled()) {
             fprintf(stderr, "[GenericAwaiterImpl] await_suspend entry fd=%d this=%p self_ptr=%p\n",
-                    fd_, (void*)this, self_.get());
+                    fd_, (void*)this, owner.get());
         }
 
         if (fd_ < 0) {
@@ -73,10 +74,10 @@ public:
                 std::ostringstream oss;
                 oss << "[GenericAwaiterImpl] await_suspend registering fd=" << fd_
                     << " handle=" << h.address()
-                    << " self_ptr=" << self_.get();
+                    << " self_ptr=" << owner.get();
                 net_io::EventLoop::debug_log(oss.str());
             }
-            reg_(fd_, h, self_);
+            reg_(fd_, h, owner);
 
             // **Immediately re-check** in case data arrived before epoll_ctl took effect.
             // If op_ now returns a value, consume it and do NOT suspend.
@@ -105,12 +106,13 @@ public:
     }
 
     std::expected<Ret,std::error_code> await_resume() noexcept {
+        auto owner = self_.lock();
         if (net_io::EventLoop::instance().debug_enabled()) {
-            std::ostringstream oss; oss << "[GenericAwaiterImpl] await_resume fd=" << fd_ << " this=" << this << " self_ptr=" << (self_.get()); net_io::EventLoop::debug_log(oss.str());
+            std::ostringstream oss; oss << "[GenericAwaiterImpl] await_resume fd=" << fd_ << " this=" << this << " self_ptr=" << owner.get(); net_io::EventLoop::debug_log(oss.str());
         }
         if (!ready_) {
             if (net_io::EventLoop::instance().debug_enabled()) {
-                std::ostringstream oss; oss << "[GenericAwaiterImpl] await_resume retry fd=" << fd_ << " self_ptr=" << (self_.get()); net_io::EventLoop::debug_log(oss.str());
+                std::ostringstream oss; oss << "[GenericAwaiterImpl] await_resume retry fd=" << fd_ << " self_ptr=" << owner.get(); net_io::EventLoop::debug_log(oss.str());
             }
             auto r = op_(fd_);
             if (r) {
@@ -124,11 +126,12 @@ public:
     }
 
     void retry(std::coroutine_handle<> h) {
+        auto owner = self_.lock();
         if (net_io::EventLoop::instance().debug_enabled()) {
             std::ostringstream oss;
             oss << "[GenericAwaiterImpl] retry fd=" << fd_
                 << " this=" << this
-                << " self_ptr=" << self_.get();
+                << " self_ptr=" << owner.get();
             net_io::EventLoop::debug_log(oss.str());
         }
 
@@ -148,10 +151,10 @@ public:
                 std::ostringstream oss;
                 oss << "[GenericAwaiterImpl] retry register fd=" << fd_
                     << " handle=" << h.address()
-                    << " self_ptr=" << self_.get();
+                    << " self_ptr=" << owner.get();
                 net_io::EventLoop::debug_log(oss.str());
             }
-            reg_(fd_, h, self_);
+            reg_(fd_, h, owner);
             return;
         }
 
@@ -160,7 +163,7 @@ public:
         h.resume();
     }
 
-    void set_self(std::shared_ptr<void> self) { self_ = std::move(self); }
+    void set_self(const std::shared_ptr<void>& self) { self_ = self; }
 };
 
 // Proxy awaiter type

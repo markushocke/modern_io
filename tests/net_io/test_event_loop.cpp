@@ -4,6 +4,7 @@ import net_io_async;
 #include <gtest/gtest.h>
 #include <thread>
 #include <chrono>
+#include <utility>
 #ifndef _WIN32
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -46,13 +47,40 @@ struct SimpleAwaitable {
 };
 
 struct SimpleTask {
+    struct promise_type;
+    using handle_type = std::coroutine_handle<promise_type>;
+
     struct promise_type {
-        SimpleTask get_return_object() { return {} ; }
-        std::suspend_never initial_suspend() { return {}; }
-        std::suspend_never final_suspend() noexcept { return {}; }
+        SimpleTask get_return_object() { return SimpleTask{handle_type::from_promise(*this)}; }
+        std::suspend_never initial_suspend() noexcept { return {}; }
+        std::suspend_always final_suspend() noexcept { return {}; }
         void return_void() {}
         void unhandled_exception() { std::terminate(); }
     };
+
+    explicit SimpleTask(handle_type h) : handle_(h) {}
+    SimpleTask(const SimpleTask&) = delete;
+    SimpleTask& operator=(const SimpleTask&) = delete;
+
+    SimpleTask(SimpleTask&& other) noexcept : handle_(std::exchange(other.handle_, {})) {}
+    SimpleTask& operator=(SimpleTask&& other) noexcept {
+        if (this != &other) {
+            if (handle_) {
+                handle_.destroy();
+            }
+            handle_ = std::exchange(other.handle_, {});
+        }
+        return *this;
+    }
+
+    ~SimpleTask() {
+        if (handle_) {
+            handle_.destroy();
+        }
+    }
+
+private:
+    handle_type handle_{};
 };
 
 SimpleTask test_register_invalid_fd(bool &out_flag) {
@@ -61,7 +89,7 @@ SimpleTask test_register_invalid_fd(bool &out_flag) {
 
 TEST(EventLoopTest, RegisterInvalidFdResumesImmediately) {
     bool resumed = false;
-    test_register_invalid_fd(resumed);
+    auto task = test_register_invalid_fd(resumed);
     // coroutine should have been resumed synchronously
     EXPECT_TRUE(resumed);
 }
@@ -73,8 +101,8 @@ struct FdAwaitable {
     bool &resumed_flag;
     bool await_ready() noexcept { return false; }
     void await_suspend(std::coroutine_handle<> h) noexcept {
-        auto owner = std::make_shared<int>(0);
-        EventLoop::instance().register_read(fd, h, owner);
+        // Tests do not require an external keepalive owner token.
+        EventLoop::instance().register_read(fd, h, {});
     }
     void await_resume() noexcept { resumed_flag = true; }
 };
@@ -93,7 +121,7 @@ TEST(EventLoopTest, RegisterWithPipeResumesReader) {
     loop.start();
 
     bool resumed = false;
-    test_pipe_reader(r, resumed);
+    auto task = test_pipe_reader(r, resumed);
 
     // write a byte to make the read end readable
     const char b = 'x';
@@ -124,8 +152,8 @@ TEST(EventLoopTest, MultipleReadersOnlyOneResumed) {
 
     bool resumed1 = false;
     bool resumed2 = false;
-    test_pipe_reader(r, resumed1);
-    test_pipe_reader(r, resumed2);
+    auto task1 = test_pipe_reader(r, resumed1);
+    auto task2 = test_pipe_reader(r, resumed2);
 
     // write one byte; only one reader should resume
     const char b = 'z';
@@ -159,10 +187,9 @@ TEST(EventLoopTest, DuplicateRegisterIgnored) {
         int fd; bool &resumed_flag;
         bool await_ready() noexcept { return false; }
         void await_suspend(std::coroutine_handle<> h) noexcept {
-            auto owner = std::make_shared<int>(0);
-            EventLoop::instance().register_read(fd, h, owner);
+            EventLoop::instance().register_read(fd, h, {});
             // second registration should be ignored by EventLoop
-            EventLoop::instance().register_read(fd, h, owner);
+            EventLoop::instance().register_read(fd, h, {});
         }
         void await_resume() noexcept { resumed_flag = true; }
     };
@@ -172,7 +199,7 @@ TEST(EventLoopTest, DuplicateRegisterIgnored) {
     };
 
     bool resumed = false;
-    test_double_register(r, resumed);
+    auto task = test_double_register(r, resumed);
 
     const char b = 'd';
     ssize_t nw = write(w, &b, 1);
@@ -200,7 +227,7 @@ TEST(EventLoopTest, SocketpairResumesReader) {
     loop.start();
 
     bool resumed = false;
-    test_pipe_reader(a, resumed); // reuse reader awaitable which only needs an fd
+    auto task = test_pipe_reader(a, resumed); // reuse reader awaitable which only needs an fd
 
     const char c = 's';
     ssize_t nw = write(b, &c, 1);
@@ -241,10 +268,9 @@ TEST(EventLoopTest, ThreadsafetyWakeAndRegister) {
 
     // repeatedly register and deregister
     for (int i = 0; i < 50; ++i) {
-        auto owner = std::make_shared<int>(0);
         // use a dummy coroutine handle: use a simple immediate-resume awaitable
         bool resumed = false;
-        test_pipe_reader(r, resumed);
+        auto task = test_pipe_reader(r, resumed);
         EventLoop::instance().deregister(r);
         std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
@@ -272,7 +298,7 @@ TEST(EventLoopTest, DeregisterPreventsResume) {
     loop.start();
 
     bool resumed = false;
-    test_pipe_reader(r, resumed);
+    auto task = test_pipe_reader(r, resumed);
 
     // remove registration before making fd readable
     EventLoop::instance().deregister(r);
@@ -302,13 +328,13 @@ TEST(EventLoopTest, StopResumesPendingReaderAndWriter) {
 
     bool reader_resumed = false;
     bool writer_resumed = false;
-    test_pipe_reader(r, reader_resumed);
+    auto reader_task = test_pipe_reader(r, reader_resumed);
 
     // writer awaitable: register write on the write end
     struct FdWriteAwaitable {
         int fd; bool &resumed_flag;
         bool await_ready() noexcept { return false; }
-        void await_suspend(std::coroutine_handle<> h) noexcept { EventLoop::instance().register_write(fd, h, std::make_shared<int>(0)); }
+        void await_suspend(std::coroutine_handle<> h) noexcept { EventLoop::instance().register_write(fd, h, {}); }
         void await_resume() noexcept { resumed_flag = true; }
     };
 
@@ -316,7 +342,7 @@ TEST(EventLoopTest, StopResumesPendingReaderAndWriter) {
         co_await FdWriteAwaitable{fd, out_flag};
     };
 
-    test_pipe_writer(w, writer_resumed);
+    auto writer_task = test_pipe_writer(w, writer_resumed);
 
     // Do not write anything; call stop to force finish_all -> resume
     EventLoop::instance().stop();

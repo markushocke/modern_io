@@ -109,3 +109,20 @@ target_compile_features(IOApp PRIVATE cxx_std_20)
 add_executable(module_compile_check EXCLUDE_FROM_ALL main.cpp)
 target_link_libraries(module_compile_check PRIVATE net_io_adapters)
 target_compile_features(module_compile_check PRIVATE cxx_std_20)
+
+# ----------------------------
+# 7) Testing
+# ----------------------------
+include(CTest)
+enable_testing()
+
+# Smoke test: run the demo app and verify it exits successfully (exit code 0).
+# The demo exercises TCP, UDP, and file I/O end-to-end on localhost.
+# NOTE: This is an integration-level smoke test only. Unit tests for individual
+# components (e.g. datagram adapters, stream factories) should be added once a
+# test framework such as Catch2 or Google Test is integrated.
+add_test(
+    NAME smoke_test
+    COMMAND IOApp
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)

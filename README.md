@@ -43,7 +43,7 @@ A modern, modular C++20 framework for high-level, type-safe, and efficient I/O: 
 ### Build
 
 ```sh
-git clone https://github.com/your-org/modern_io.git
+git clone https://github.com/markushocke/modern_io.git
 cd modern_io
 cmake -B build
 cmake --build build
@@ -53,20 +53,22 @@ cmake --build build
 
 ```
 modern_io/
-  ├── modern_io.ixx           # Main module
-  ├── modern_io_concepts.ixx  # Stream concepts
-  ├── modern_io_file.ixx      # File streams
-  ├── modern_io_data.ixx      # Data (de)serialization
-  ├── modern_io_buffered.ixx  # Buffered streams
+  ├── modern_io.ixx           # Main module (umbrella)
+  ├── modern_io_concepts.ixx  # Stream concepts (InputStream, OutputStream, Async*)
+  ├── modern_io_file.ixx      # File streams (FileInputStream, FileOutputStream)
+  ├── modern_io_data.ixx      # Data (de)serialization (DataInputStream, DataOutputStream)
+  ├── modern_io_buffered.ixx  # Buffered streams (BufferedInputStream, BufferedOutputStream)
+  ├── modern_io_iostream.ixx  # std::istream / std::ostream adapters
   ├── net_io.ixx              # Network umbrella module
-  ├── net_io_base.ixx         # Base concepts/types
-  ├── tcp_endpoint.ixx        # TCP endpoint abstraction
-  ├── tcp_client.ixx          # TCP client
-  ├── tcp_server.ixx          # TCP server
-  ├── udp_endpoint.ixx        # UDP endpoint abstraction
-  ├── udp_transport.ixx       # UDP transport
-  ├── net_io_adapters.ixx     # Adapters and shared streams
-  ├── main.cpp                # Example usage
+  ├── net_io_base.ixx         # Platform abstraction (socket types, options, WSA init)
+  ├── net_io_concepts.ixx     # Network concepts (Readable, Writable, Transportable, Acceptable)
+  ├── tcp_endpoint.ixx        # TCP endpoint abstraction (address + port, DNS resolution)
+  ├── tcp_client.ixx          # TCP client (connect, read, write, close)
+  ├── tcp_server.ixx          # TCP server (listen, accept, dual-stack IPv4/IPv6)
+  ├── udp_endpoint.ixx        # UDP endpoint abstraction (client/server mode)
+  ├── udp_transport.ixx       # UDP transport (open_connect, open_bind, sendto/recvfrom)
+  ├── net_io_adapters.ixx     # Adapters, factories, executors, and server helpers
+  ├── main.cpp                # Example usage (TCP/UDP/File demos)
   └── CMakeLists.txt
 ```
 
@@ -270,11 +272,33 @@ SOFTWARE.
 ## Support
 
 For questions, bug reports, or contributions, please open an issue or pull request on GitHub.
-- [Markus Hocke](https://github.com/markushocke)
-- Contributors welcome!
 
 ---
 
-## Support
+## Roadmap & Next Steps
 
-For questions, bug reports, or contributions, please open an issue or pull request on GitHub.
+### 🔴 Important Fixes
+
+1. **Test Infrastructure**: There is currently no formal test suite. Adding [Catch2](https://github.com/catchorg/Catch2) or [Google Test](https://github.com/google/googletest) with unit and integration tests would greatly improve reliability and catch regressions early. A basic end-to-end smoke test (`IOApp`) is now wired into CTest as a first step.
+2. **Error Handling in Network Sockets**: Some socket-level failures (e.g., `set_socket_option` calls) are currently silently ignored. These should propagate errors or at least log warnings.
+
+### 🟡 Improvements
+
+4. **`std::filesystem` support**: Replace `const std::string& path` in `FileInputStream` / `FileOutputStream` with `const std::filesystem::path&` for better cross-platform path handling.
+5. **`TransportSource::eof()` semantics**: The socket-based `eof()` always returns `false`. It should detect a graceful TCP connection close (peer sends FIN) and return `true` in that case.
+6. **TcpServer connection limits / timeout**: Add configurable accept timeout and maximum simultaneous connections to prevent resource exhaustion.
+7. **Async I/O implementation**: The `AsyncInputStream` and `AsyncOutputStream` concepts are defined but no concrete implementation exists. A `std::future`-based or coroutine-based implementation would complete the async story.
+8. **Thread pool executor**: `ThreadExecutor` spawns an unbounded number of detached threads. A fixed-size thread pool would be safer for production use.
+9. **Unit tests for adapters**: The datagram adapter factory fixes (`make_datagram_sink`, `make_datagram_source`) and the `DuplexDatagramStream` null-peer guard should be covered by dedicated unit tests once a test framework is integrated.
+10. **Compiler-specific include guards**: The `#ifndef _MSC_VER` / `#ifdef _MSC_VER` blocks in every module file are repetitive. These can be unified with a single platform header.
+
+### 🟢 Missing Features
+
+11. **SSL/TLS support**: A `TlsClient` / `TlsServer` wrapping OpenSSL or a similar library would enable secure connections without changing the stream interface.
+12. **HTTP protocol layer**: A lightweight HTTP/1.1 request/response parser built on top of `TcpDuplexStream` would make the framework usable for REST APIs and webhooks.
+13. **WebSocket support**: WebSocket framing on top of TCP would enable bidirectional web communication.
+14. **Connection pooling**: A `TcpConnectionPool` to reuse and manage multiple concurrent connections efficiently.
+15. **DNS caching**: `TcpEndpoint` currently calls `getaddrinfo()` on every `open()`. A simple TTL-based cache would reduce latency for frequently reconnected endpoints.
+16. **Graceful server shutdown**: `TcpServer::stop()` should drain in-flight connections before closing, instead of immediately closing the listening socket.
+17. **Rate limiting / backpressure**: Mechanisms to throttle reads/writes on streams to prevent overwhelming slow consumers.
+18. **Serialization for more types**: `DataOutputStream`/`DataInputStream` support fixed-width integers, floats, and strings. Adding support for `bool`, `int8_t`/`uint8_t`, `int16_t`/`uint16_t`, `std::vector`, and user-defined types via a traits hook would make it more general-purpose.

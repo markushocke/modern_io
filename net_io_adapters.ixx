@@ -369,14 +369,14 @@ export namespace net_io_adapters
     };
 
     // Factory function for DatagramSink
-    template<net_io_concepts::Writable T> // <--- angepasst
+    template<net_io_concepts::Writable T>
     DatagramSink<T> make_datagram_sink(std::shared_ptr<T> t)
     {
-        return DatagramSink<T>(*t);
+        return DatagramSink<T>(t);
     }
 
     // Adapter for UDP datagram input, reads one datagram at a time
-    template<net_io_concepts::Readable T> // <--- angepasst
+    template<net_io_concepts::Readable T>
     class DatagramSource
     {
     public:
@@ -436,7 +436,7 @@ export namespace net_io_adapters
     template<net_io_concepts::Readable T>
     DatagramSource<T> make_datagram_source(std::shared_ptr<T> t)
     {
-        return DatagramSource<T>(*t);
+        return DatagramSource<T>(t);
     }
 
     // DuplexDatagramStream: Bidirectional datagram stream with address management
@@ -481,8 +481,8 @@ export namespace net_io_adapters
         void write(const char* data, std::size_t size)
         {
             std::lock_guard<std::mutex> lock(mtx_);
-            // if (!last_peer_)
-            //     throw std::runtime_error("No peer address known for write");
+            if (!last_peer_)
+                throw std::runtime_error("No peer address known for write");
             sink_.write_to(data, size, last_peer_->first, last_peer_->second);
         }
         void write(std::span<const std::byte> data)

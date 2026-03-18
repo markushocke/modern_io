@@ -40,8 +40,10 @@ import <vector>;
 // Module imports (sorted)
 import net_io_base;
 import net_io_concepts; // Import network transport concepts for constraints.
+import net_io.exceptions;
 import net_io.udp_endpoint;
 export import net_io_base; // Export sock_t and invalid_socket
+export import net_io.exceptions;
 
 export namespace net_io
 {

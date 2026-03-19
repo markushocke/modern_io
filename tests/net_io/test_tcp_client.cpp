@@ -2,6 +2,7 @@
 import net_io;
 import net_io.tcp_client;
 import net_io.tcp_endpoint;
+import net_io.tcp_server;
 #include <gtest/gtest.h>
 #include <thread>
 #include <chrono>

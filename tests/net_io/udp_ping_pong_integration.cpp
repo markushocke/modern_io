@@ -1,5 +1,6 @@
 import net_io;
 import net_io.udp_transport;
+import net_io.udp_endpoint;
 
 #include <gtest/gtest.h>
 #include <thread>

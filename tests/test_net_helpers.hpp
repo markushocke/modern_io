@@ -12,7 +12,7 @@ namespace test_helpers {
 struct NetInit {
     NetInit() {
 #if defined(_WIN32)
-        net_io::detail::ensure_wsa();
+        detail::ensure_wsa();
 #endif
     }
 };

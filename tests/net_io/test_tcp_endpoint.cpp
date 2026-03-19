@@ -1,6 +1,7 @@
 // test_tcp_endpoint.cpp
 import net_io;
 import net_io.tcp_endpoint;
+import net_io.exceptions;
 #include <gtest/gtest.h>
 #include <string>
 #include <cstring>

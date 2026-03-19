@@ -9,10 +9,6 @@ using namespace net_io;
 #include <thread>
 #include <chrono>
 #include <cstring>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
 
 using namespace net_io;
 

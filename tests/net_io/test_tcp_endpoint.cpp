@@ -3,9 +3,8 @@ import net_io;
 import net_io.tcp_endpoint;
 #include <gtest/gtest.h>
 #include <string>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <cstring>
+#include "tests/test_net_helpers.hpp"
 
 using namespace net_io;
 

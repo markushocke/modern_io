@@ -2,6 +2,7 @@
 import net_io;
 import net_io.tcp_client;
 import net_io.tcp_endpoint;
+import net_io.tcp_server;
 #include <gtest/gtest.h>
 #include <thread>
 #include <chrono>
@@ -13,10 +14,16 @@ using namespace net_io;
 TEST(TcpClientTest, ConnectAndExchange) {
     // Start a simple server socket using TcpServer to accept one connection
     uint16_t port = [](){
-        int s = ::socket(AF_INET, SOCK_STREAM, 0);
+        auto s = ::socket(AF_INET, SOCK_STREAM, 0);
         sockaddr_in a{}; a.sin_family = AF_INET; a.sin_addr.s_addr = htonl(INADDR_LOOPBACK); a.sin_port = 0;
         ::bind(s, reinterpret_cast<sockaddr*>(&a), sizeof(a));
-        socklen_t len = sizeof(a); ::getsockname(s, reinterpret_cast<sockaddr*>(&a), &len); uint16_t p = ntohs(a.sin_port); ::close(s); return p;
+        socklen_t len = sizeof(a); ::getsockname(s, reinterpret_cast<sockaddr*>(&a), &len); uint16_t p = ntohs(a.sin_port);
+#ifdef _WIN32
+        closesocket(s);
+#else
+        ::close(s);
+#endif
+        return p;
     }();
     ASSERT_NE(port, 0u);
 

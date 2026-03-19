@@ -1,6 +1,8 @@
 // test_tcp_server.cpp
 import net_io;
 import net_io.tcp_server;
+import net_io.tcp_client;
+import net_io.tcp_endpoint;
 #include <gtest/gtest.h>
 
 using namespace net_io;
@@ -9,10 +11,6 @@ using namespace net_io;
 #include <thread>
 #include <chrono>
 #include <cstring>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
 
 using namespace net_io;
 

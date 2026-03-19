@@ -1,6 +1,7 @@
 // test_udp_transport.cpp
 import net_io;
 import net_io.udp_transport;
+import net_io.udp_endpoint;
 #include <gtest/gtest.h>
 #include <thread>
 #include <cstring>
@@ -11,10 +12,16 @@ using namespace net_io;
 TEST(UdpTransportTest, SendReceiveConnected) {
     // Find ephemeral port
     uint16_t port = [](){
-        int s = ::socket(AF_INET, SOCK_DGRAM, 0);
+        auto s = ::socket(AF_INET, SOCK_DGRAM, 0);
         sockaddr_in a{}; a.sin_family = AF_INET; a.sin_addr.s_addr = htonl(INADDR_LOOPBACK); a.sin_port = 0;
         ::bind(s, reinterpret_cast<sockaddr*>(&a), sizeof(a));
-        socklen_t len = sizeof(a); ::getsockname(s, reinterpret_cast<sockaddr*>(&a), &len); uint16_t p = ntohs(a.sin_port); ::close(s); return p;
+        socklen_t len = sizeof(a); ::getsockname(s, reinterpret_cast<sockaddr*>(&a), &len); uint16_t p = ntohs(a.sin_port);
+#ifdef _WIN32
+        closesocket(s);
+#else
+        ::close(s);
+#endif
+        return p;
     }();
     ASSERT_NE(port, 0u);
 

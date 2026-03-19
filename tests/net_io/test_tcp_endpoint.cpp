@@ -1,11 +1,11 @@
 // test_tcp_endpoint.cpp
 import net_io;
 import net_io.tcp_endpoint;
+import net_io.exceptions;
 #include <gtest/gtest.h>
 #include <string>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <cstring>
+#include "tests/test_net_helpers.hpp"
 
 using namespace net_io;
 

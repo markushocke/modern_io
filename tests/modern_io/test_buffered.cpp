@@ -1,12 +1,40 @@
 // test_buffered.cpp
 import modern_io;
 import modern_io.buffered;
+import modern_io_async;
 #include <gtest/gtest.h>
+#include <coroutine>
+#include <expected>
+#include <system_error>
 #include <vector>
 #include <span>
 #include <cstring>
+#include <memory_resource>
 
 using namespace modern_io;
+
+class CountingMemoryResource : public std::pmr::memory_resource {
+public:
+    std::size_t allocation_count = 0;
+    std::size_t deallocation_count = 0;
+    std::size_t bytes_allocated = 0;
+
+private:
+    void* do_allocate(std::size_t bytes, std::size_t alignment) override {
+        ++allocation_count;
+        bytes_allocated += bytes;
+        return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+    }
+
+    void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override {
+        ++deallocation_count;
+        std::pmr::new_delete_resource()->deallocate(p, bytes, alignment);
+    }
+
+    bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
+        return this == &other;
+    }
+};
 
 // Mock Stream for testing
 class CountingOutputStream {
@@ -64,6 +92,32 @@ public:
     }
 };
 
+class CountingAsyncOutputStream {
+public:
+    std::vector<char> data;
+    std::size_t write_count = 0;
+    std::size_t flush_count = 0;
+
+    ExpectedTask<std::size_t> write_async(const char* ptr, std::size_t size) {
+        data.insert(data.end(), ptr, ptr + size);
+        ++write_count;
+        co_return std::expected<std::size_t, std::error_code>{size};
+    }
+
+    ExpectedTask<std::size_t> write_async(std::span<const std::byte> span) {
+        co_return co_await write_async(reinterpret_cast<const char*>(span.data()), span.size());
+    }
+
+    ExpectedTask<std::size_t> write_async(std::span<const char> span) {
+        co_return co_await write_async(span.data(), span.size());
+    }
+
+    std::expected<void, std::error_code> flush() {
+        ++flush_count;
+        return {};
+    }
+};
+
 TEST(BufferedOutputStreamTest, BasicBuffering) {
     CountingOutputStream counter;
     BufferedOutputStream<CountingOutputStream, 16> buffered(std::move(counter));
@@ -71,6 +125,75 @@ TEST(BufferedOutputStreamTest, BasicBuffering) {
     // Write less than buffer size - should not trigger underlying write
     buffered.write("Hello", 5);
     // Cannot access counter directly after move, need to test differently
+}
+
+TEST(BufferedOutputStreamTest, UsesProvidedMemoryResource) {
+    CountingMemoryResource resource;
+    CountingOutputStream counter;
+
+    {
+        BufferedOutputStream<CountingOutputStream, 64> buffered(std::move(counter), &resource);
+        buffered.write("abc", 3);
+    }
+
+    EXPECT_GE(resource.allocation_count, 1u);
+    EXPECT_GE(resource.bytes_allocated, 64u);
+    EXPECT_EQ(resource.deallocation_count, resource.allocation_count);
+}
+
+TEST(ConnectionArenaTest, ReusesInlineBufferWithoutUpstreamAllocations) {
+    CountingMemoryResource upstream;
+    ConnectionArena arena(128, &upstream);
+
+    {
+        CountingOutputStream counter;
+        BufferedOutputStream<CountingOutputStream, 64> buffered(std::move(counter), arena);
+        buffered.write("abc", 3);
+        buffered.flush();
+    }
+
+    EXPECT_EQ(upstream.allocation_count, 0u);
+
+    arena.reset();
+
+    {
+        CountingOutputStream counter;
+        BufferedOutputStream<CountingOutputStream, 64> buffered(std::move(counter), arena);
+        buffered.write("xyz", 3);
+        buffered.flush();
+    }
+
+    EXPECT_EQ(upstream.allocation_count, 0u);
+}
+
+TEST(ConnectionArenaTest, FallsBackToUpstreamWhenInlineBufferIsTooSmall) {
+    CountingMemoryResource upstream;
+    ConnectionArena arena(16, &upstream);
+    CountingOutputStream counter;
+
+    {
+        BufferedOutputStream<CountingOutputStream, 64> buffered(std::move(counter), arena);
+        buffered.write("abc", 3);
+    }
+
+    EXPECT_GE(upstream.allocation_count, 1u);
+}
+
+TEST(AsyncBufferedOutputStreamTest, UsesConnectionArenaWithoutUpstreamAllocations) {
+    CountingMemoryResource upstream;
+    ConnectionArena arena(128, &upstream);
+    CountingAsyncOutputStream counter;
+
+    AsyncBufferedOutputStream<CountingAsyncOutputStream, 64> buffered(std::move(counter), arena);
+
+    auto write_result = buffered.write_async("hello", 5).sync_wait();
+    ASSERT_TRUE((bool)write_result);
+    EXPECT_EQ(write_result.value(), 5u);
+
+    auto flush_result = buffered.flush_async().sync_wait();
+    ASSERT_TRUE((bool)flush_result);
+
+    EXPECT_EQ(upstream.allocation_count, 0u);
 }
 
 TEST(BufferedOutputStreamTest, BufferFlushOnFull) {
@@ -141,6 +264,21 @@ TEST(BufferedInputStreamTest, BasicBuffering) {
     
     EXPECT_EQ(read_size, 4);
     EXPECT_EQ(std::string(buf, 4), "ABCD");
+}
+
+TEST(BufferedInputStreamTest, UsesProvidedMemoryResource) {
+    CountingMemoryResource resource;
+    CountingInputStream counter(std::vector<char>{'A', 'B', 'C'});
+
+    {
+        BufferedInputStream<CountingInputStream, 32> buffered(std::move(counter), &resource);
+        char buf[3];
+        EXPECT_EQ(buffered.read(buf, 3), 3u);
+    }
+
+    EXPECT_GE(resource.allocation_count, 1u);
+    EXPECT_GE(resource.bytes_allocated, 32u);
+    EXPECT_EQ(resource.deallocation_count, resource.allocation_count);
 }
 
 TEST(BufferedInputStreamTest, MultipleReads) {

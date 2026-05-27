@@ -25,6 +25,7 @@ module;
 
 export module net_io.async_tcp_server;
 
+import modern_io.connection_arena;
 import net_io_base;
 import net_io.tcp_endpoint;
 import net_io.async_tcp_socket;
@@ -37,7 +38,13 @@ namespace net_io
 {
 export class AsyncTcpServer {
 public:
-    AsyncTcpServer() : fd_(invalid_socket), listening_(false) {}
+    explicit AsyncTcpServer(
+        EventReactor& loop = default_event_reactor(),
+        modern_io::ConnectionArenaSettings accepted_socket_arena_settings = {})
+        : fd_(invalid_socket),
+          listening_(false),
+          loop_(&loop),
+          accepted_socket_arena_settings_(accepted_socket_arena_settings) {}
     ~AsyncTcpServer() { stop(); }
 
     std::expected<void, std::error_code> start(const TcpEndpoint& ep, int backlog = SOMAXCONN) {
@@ -57,7 +64,7 @@ public:
             auto ec = last_socket_error(); close_fd(); return std::unexpected(ec);
         }
         listening_ = true;
-        if (EventLoop::instance().debug_enabled()) {
+        if (loop_->is_debug_enabled()) {
             std::ostringstream oss;
             oss << "[AsyncTcpServer] start this=" << this << " fd=" << fd_ << " listening=" << listening_;
             EventLoop::debug_log(oss.str());
@@ -68,30 +75,39 @@ public:
     void stop() {
         listening_ = false;
         if (fd_ != invalid_socket) {
-            EventLoop::instance().deregister(fd_);
+            loop_->deregister(fd_);
         }
         close_fd();
     }
 
     sock_t native_handle() const noexcept { return fd_; }
+    [[nodiscard]] EventReactor& event_loop() noexcept { return *loop_; }
+    [[nodiscard]] const EventReactor& event_loop() const noexcept { return *loop_; }
+    [[nodiscard]] modern_io::ConnectionArenaSettings connection_arena_settings() const noexcept {
+        return accepted_socket_arena_settings_;
+    }
+
+    void set_connection_arena_settings(modern_io::ConnectionArenaSettings settings) noexcept {
+        accepted_socket_arena_settings_ = settings;
+    }
 
     // Async accept: returns IoTask with a shared_ptr<AsyncTcpSocket>
     IoTask<std::expected<std::shared_ptr<AsyncTcpSocket>, std::error_code>>
     accept() {
-        if (EventLoop::instance().debug_enabled()) {
+        if (loop_->is_debug_enabled()) {
             std::ostringstream oss;
             oss << "[AsyncTcpServer] accept call this=" << this << " fd=" << fd_ << " listening=" << listening_;
             EventLoop::debug_log(oss.str());
         }
 
-        if (EventLoop::instance().debug_enabled()) {
+        if (loop_->is_debug_enabled()) {
             std::ostringstream oss;
             oss << "[AsyncTcpServer] accept enter fd=" << fd_ << " listening=" << listening_;
             EventLoop::debug_log(oss.str());
         }
 
         if (!listening_ || fd_ == invalid_socket) {
-            if (EventLoop::instance().debug_enabled()) {
+            if (loop_->is_debug_enabled()) {
                 EventLoop::debug_log("[AsyncTcpServer] accept early bad_file_descriptor");
             }
             co_return std::unexpected(std::make_error_code(std::errc::bad_file_descriptor));
@@ -106,7 +122,7 @@ public:
 #ifdef _WIN32
                 sock_t client = ::accept(fd_, reinterpret_cast<sockaddr*>(&peer), &sl);
                 if (client != INVALID_SOCKET) {
-                    if (EventLoop::instance().debug_enabled()) {
+                    if (loop_->is_debug_enabled()) {
                         std::ostringstream oss;
                         oss << "[AsyncTcpServer] accept immediate success fd=" << client;
                         EventLoop::debug_log(oss.str());
@@ -123,7 +139,7 @@ public:
                 while (true) {
                     sock_t client = ::accept4(fd_, reinterpret_cast<sockaddr*>(&peer), &sl, SOCK_NONBLOCK);
                     if (client >= 0) {
-                        if (EventLoop::instance().debug_enabled()) {
+                        if (loop_->is_debug_enabled()) {
                             std::ostringstream oss;
                             oss << "[AsyncTcpServer] accept immediate success fd=" << client;
                             EventLoop::debug_log(oss.str());
@@ -134,12 +150,12 @@ public:
                         continue;
                     }
                     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                        if (EventLoop::instance().debug_enabled()) {
+                        if (loop_->is_debug_enabled()) {
                             EventLoop::debug_log("[AsyncTcpServer] accept would block");
                         }
                         return std::unexpected(std::make_error_code(std::errc::resource_unavailable_try_again));
                     }
-                    if (EventLoop::instance().debug_enabled()) {
+                    if (loop_->is_debug_enabled()) {
                         std::ostringstream oss;
                         oss << "[AsyncTcpServer] accept error errno=" << errno;
                         EventLoop::debug_log(oss.str());
@@ -148,14 +164,14 @@ public:
                 }
 #endif
             },
-            [](sock_t& fd, std::coroutine_handle<> h, std::shared_ptr<void> owner) {
-                EventLoop::instance().register_read(fd, h, owner);
+            [this](sock_t& fd, std::coroutine_handle<> h, std::shared_ptr<void> owner) {
+                loop_->register_io(make_io_registration(fd, IOEvent::Read, h, std::move(owner)));
             },
             false
         );
 
         if (!accepted) {
-            if (EventLoop::instance().debug_enabled()) {
+            if (loop_->is_debug_enabled()) {
                 std::ostringstream oss;
                 oss << "[AsyncTcpServer] accept completed with error=" << accepted.error().message();
                 EventLoop::debug_log(oss.str());
@@ -163,16 +179,16 @@ public:
             co_return std::unexpected(accepted.error());
         }
 
-        if (EventLoop::instance().debug_enabled()) {
+        if (loop_->is_debug_enabled()) {
             std::ostringstream oss;
             oss << "[AsyncTcpServer] accept completed fd=" << *accepted;
             EventLoop::debug_log(oss.str());
         }
 
 #ifdef _WIN32
-        co_return std::make_shared<AsyncTcpSocket>(*accepted, false);
+    co_return std::make_shared<AsyncTcpSocket>(*accepted, false, *loop_, accepted_socket_arena_settings_);
 #else
-        co_return std::make_shared<AsyncTcpSocket>(*accepted, true);
+    co_return std::make_shared<AsyncTcpSocket>(*accepted, true, *loop_, accepted_socket_arena_settings_);
 #endif
     }
 
@@ -198,6 +214,8 @@ private:
 
     sock_t fd_;
     bool listening_;
+    EventReactor* loop_;
+    modern_io::ConnectionArenaSettings accepted_socket_arena_settings_{};
 };
 
 } // namespace net_io

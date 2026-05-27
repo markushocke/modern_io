@@ -37,6 +37,7 @@ namespace std {
 #endif
 
 export module net_io.async_udp_socket;
+import modern_io.connection_arena;
 import net_io_base;
 import net_io.event_loop;
 import net_io.generic_awaiter;
@@ -83,8 +84,24 @@ inline std::error_code map_udp_errno(int e) {
 } // namespace
 
 export class AsyncUdpSocket : public std::enable_shared_from_this<AsyncUdpSocket> {
+    static std::shared_ptr<modern_io::ConnectionArena>
+    normalize_arena(std::shared_ptr<modern_io::ConnectionArena> arena) {
+        if (arena) {
+            return arena;
+        }
+        return std::make_shared<modern_io::ConnectionArena>();
+    }
+
 public:
-    AsyncUdpSocket() : fd_(invalid_socket) {}
+    explicit AsyncUdpSocket(
+        EventReactor& loop = default_event_reactor(),
+        std::shared_ptr<modern_io::ConnectionArena> arena = {})
+        : fd_(invalid_socket), loop_(&loop), arena_(normalize_arena(std::move(arena))) {}
+
+    explicit AsyncUdpSocket(
+        EventReactor& loop,
+        modern_io::ConnectionArenaSettings arena_settings)
+        : fd_(invalid_socket), loop_(&loop), arena_(modern_io::make_connection_arena(arena_settings)) {}
 
     ~AsyncUdpSocket() { close(); }
 
@@ -112,6 +129,8 @@ public:
 
 private:
     sock_t fd_{invalid_socket};
+    EventReactor* loop_;
+    std::shared_ptr<modern_io::ConnectionArena> arena_;
     sockaddr_storage local_addr_{};
     socklen_t local_addrlen_{0};
     sockaddr_storage peer_{}; // Zieladresse für send()
@@ -119,6 +138,12 @@ private:
     bool connected_{false};   // Connect wurde aufgerufen
 
 public:
+    [[nodiscard]] EventReactor& event_loop() noexcept { return *loop_; }
+    [[nodiscard]] const EventReactor& event_loop() const noexcept { return *loop_; }
+    [[nodiscard]] modern_io::ConnectionArena& connection_arena() noexcept { return *arena_; }
+    [[nodiscard]] const modern_io::ConnectionArena& connection_arena() const noexcept { return *arena_; }
+    [[nodiscard]] std::shared_ptr<modern_io::ConnectionArena> connection_arena_handle() const noexcept { return arena_; }
+
     // UDP connect setzt Default-Zieladresse für send/recv
     [[nodiscard]] auto async_connect(const sockaddr_storage& addr, socklen_t len) {
         struct ConnectAwaiter {
@@ -166,7 +191,7 @@ public:
 
             void await_suspend(std::coroutine_handle<> h) {
                 // Bei UDP connected nach erfolgreichem connect sofort resumieren
-                EventLoop::instance().register_write(fd, h);
+                self->event_loop().register_io(make_io_registration(fd, IOEvent::Write, h));
             }
 
             std::expected<void, std::error_code> await_resume() {
@@ -338,7 +363,8 @@ public:
     }
 
     [[nodiscard]] auto async_read(std::span<char> buf) {
-        return net_io::read_some_async(
+        return net_io::read_some_async_on(
+            *loop_,
             [this]() -> sock_t { return this->native_handle(); },
             [this, buf](sock_t&) -> std::expected<std::size_t, std::error_code> {
                 std::error_code ec;
@@ -350,7 +376,8 @@ public:
     }
 
     [[nodiscard]] auto async_write(std::span<const char> buf) {
-        return net_io::write_some_async(
+        return net_io::write_some_async_on(
+            *loop_,
             [this]() -> sock_t { return this->native_handle(); },
             [this, buf](sock_t&) -> std::expected<std::size_t, std::error_code> {
                 std::error_code ec;
@@ -366,7 +393,7 @@ public:
 
     void close() {
         if (fd_ != invalid_socket) {
-            EventLoop::instance().deregister(fd_);
+            loop_->deregister(fd_);
 #ifdef _WIN32
             ::closesocket(fd_);
 #else

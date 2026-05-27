@@ -118,25 +118,40 @@ export namespace net_io
         return run_registered_write(fd, std::move(op_callable), std::move(reg));
     }
 
-    // Convenience wrappers using EventLoop directly
+    // Compatibility adapters for the runtime-facing EventReactor bridge. The
+    // in-repo EventLoop is only one implementation of that bridge.
     template<typename StreamOrFd, typename Op>
     IoTask<std::expected<std::size_t, std::error_code>>
-    read_some_async(StreamOrFd&& s, Op op) {
+    read_some_async_on(EventReactor& loop, StreamOrFd&& s, Op op) {
         return read_some_async_generic(std::forward<StreamOrFd>(s), std::forward<Op>(op),
-            [](auto& fd, std::coroutine_handle<> h, std::shared_ptr<void> owner){
-                EventLoop::instance().register_read(fd, h, owner);
+            [&loop](auto& fd, std::coroutine_handle<> h, std::shared_ptr<void> owner){
+                loop.register_io(make_io_registration(fd, IOEvent::Read, h, std::move(owner)));
             }
         );
     }
 
     template<typename StreamOrFd, typename Op>
     IoTask<std::expected<std::size_t, std::error_code>>
-    write_some_async(StreamOrFd&& s, Op op) {
+    write_some_async_on(EventReactor& loop, StreamOrFd&& s, Op op) {
         return write_some_async_generic(std::forward<StreamOrFd>(s), std::forward<Op>(op),
-            [](auto& fd, std::coroutine_handle<> h, std::shared_ptr<void> owner){
-                EventLoop::instance().register_write(fd, h, owner);
+            [&loop](auto& fd, std::coroutine_handle<> h, std::shared_ptr<void> owner){
+                loop.register_io(make_io_registration(fd, IOEvent::Write, h, std::move(owner)));
             }
         );
+    }
+
+    // Convenience wrappers using the default legacy EventLoop directly.
+    // Convenience wrappers using the default bridge reactor directly.
+    template<typename StreamOrFd, typename Op>
+    IoTask<std::expected<std::size_t, std::error_code>>
+    read_some_async(StreamOrFd&& s, Op op) {
+        return read_some_async_on(default_event_reactor(), std::forward<StreamOrFd>(s), std::forward<Op>(op));
+    }
+
+    template<typename StreamOrFd, typename Op>
+    IoTask<std::expected<std::size_t, std::error_code>>
+    write_some_async(StreamOrFd&& s, Op op) {
+        return write_some_async_on(default_event_reactor(), std::forward<StreamOrFd>(s), std::forward<Op>(op));
     }
 
     // NOTE: High-level stream-style helpers `read_exact_async`/`write_all_async`

@@ -3,6 +3,8 @@ module;
 #ifndef _MSC_VER
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <utility>
 #include <span>
 #include <expected>
@@ -15,6 +17,8 @@ export module net_io.async_concepts;
 #ifdef _MSC_VER
 import <concepts>;
 import <cstddef>;
+import <cstdint>;
+import <memory>;
 import <utility>;
 import <span>;
 import <expected>;
@@ -145,5 +149,94 @@ namespace net_io_concepts
   concept AsyncAcceptable = requires(S& s) {
       { s.start() } -> std::same_as<void>;
       { s.stop() } -> std::same_as<void>;
+  };
+}
+
+export namespace net_io
+{
+  enum class IOEvent : std::uint8_t {
+      None  = 0,
+      Read  = 1u << 0,
+      Write = 1u << 1,
+      Error = 1u << 2,
+      Hangup = 1u << 3
+  };
+
+  [[nodiscard]] constexpr IOEvent operator|(IOEvent lhs, IOEvent rhs) noexcept {
+      return static_cast<IOEvent>(
+          static_cast<std::uint8_t>(lhs) | static_cast<std::uint8_t>(rhs));
+  }
+
+  [[nodiscard]] constexpr IOEvent operator&(IOEvent lhs, IOEvent rhs) noexcept {
+      return static_cast<IOEvent>(
+          static_cast<std::uint8_t>(lhs) & static_cast<std::uint8_t>(rhs));
+  }
+
+  [[nodiscard]] constexpr bool has_event(IOEvent events, IOEvent event) noexcept {
+      return (static_cast<std::uint8_t>(events) & static_cast<std::uint8_t>(event)) != 0;
+  }
+
+#ifdef _WIN32
+  using NativeIoHandleType = void*;
+#else
+  using NativeIoHandleType = int;
+#endif
+
+  struct IoRegistration {
+      NativeIoHandleType handle{};
+      IOEvent events{IOEvent::None};
+      std::coroutine_handle<> resume_handle{};
+      std::shared_ptr<void> owner{};
+  };
+
+    class EventReactor {
+    public:
+      virtual ~EventReactor() = default;
+      virtual void register_io(const IoRegistration& registration) = 0;
+      virtual void deregister(int fd) = 0;
+      [[nodiscard]] virtual bool is_debug_enabled() const noexcept { return false; }
+    };
+
+    template<typename T>
+    concept NativeIoHandle = requires(T& t) {
+      { t.native_handle() } -> std::convertible_to<NativeIoHandleType>;
+    };
+
+    template<typename Handle>
+    requires std::convertible_to<Handle, NativeIoHandleType>
+    [[nodiscard]] inline IoRegistration make_io_registration(
+      Handle handle,
+      IOEvent events,
+      std::coroutine_handle<> resume_handle,
+      std::shared_ptr<void> owner = {}) {
+      return IoRegistration{
+        static_cast<NativeIoHandleType>(handle),
+        events,
+        resume_handle,
+        std::move(owner)
+      };
+    }
+
+  template<NativeIoHandle T>
+    [[nodiscard]] inline IoRegistration make_io_registration(
+      T& io_device,
+      IOEvent events,
+      std::coroutine_handle<> resume_handle,
+      std::shared_ptr<void> owner = {}) {
+      return make_io_registration(io_device.native_handle(), events, resume_handle, std::move(owner));
+    }
+
+    template<typename T>
+  concept IoRegistrationLike = requires(T r) {
+      { r.handle } -> std::convertible_to<NativeIoHandleType>;
+      { r.events } -> std::convertible_to<IOEvent>;
+      { r.resume_handle } -> std::same_as<std::coroutine_handle<>&>;
+      { r.owner } -> std::same_as<std::shared_ptr<void>&>;
+  };
+
+  template<typename T>
+  concept EventReactorLike = requires(T& reactor, const IoRegistration& registration, int fd) {
+      { reactor.register_io(registration) } -> std::same_as<void>;
+      { reactor.deregister(fd) } -> std::same_as<void>;
   };
 }

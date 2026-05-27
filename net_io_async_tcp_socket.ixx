@@ -22,6 +22,7 @@ module;
 
 export module net_io.async_tcp_socket;
 
+import modern_io.connection_arena;
 import net_io_base;
 import net_io.generic_awaiter;
 import net_io.event_loop;
@@ -43,10 +44,41 @@ inline std::error_code map_errno_blocking(int e) {
 
 // ---------------- AsyncTcpSocket Class ----------------
 export class AsyncTcpSocket : public std::enable_shared_from_this<AsyncTcpSocket> {
-public:
-    AsyncTcpSocket() : fd_(invalid_socket) {}
+    static std::shared_ptr<modern_io::ConnectionArena>
+    normalize_arena(std::shared_ptr<modern_io::ConnectionArena> arena) {
+        if (arena) {
+            return arena;
+        }
+        return std::make_shared<modern_io::ConnectionArena>();
+    }
 
-    explicit AsyncTcpSocket(sock_t fd, bool already_nonblocking = false) : fd_(fd) {
+public:
+    explicit AsyncTcpSocket(
+        EventReactor& loop = default_event_reactor(),
+        std::shared_ptr<modern_io::ConnectionArena> arena = {})
+        : fd_(invalid_socket), loop_(&loop), arena_(normalize_arena(std::move(arena))) {}
+
+    explicit AsyncTcpSocket(
+        EventReactor& loop,
+        modern_io::ConnectionArenaSettings arena_settings)
+        : fd_(invalid_socket), loop_(&loop), arena_(modern_io::make_connection_arena(arena_settings)) {}
+
+    explicit AsyncTcpSocket(
+        sock_t fd,
+        bool already_nonblocking = false,
+        EventReactor& loop = default_event_reactor(),
+        std::shared_ptr<modern_io::ConnectionArena> arena = {})
+        : fd_(fd), loop_(&loop), arena_(normalize_arena(std::move(arena))) {
+        if (fd_ != invalid_socket && !already_nonblocking)
+            set_socket_option(fd_, SocketOption::NonBlocking, 1);
+    }
+
+    explicit AsyncTcpSocket(
+        sock_t fd,
+        bool already_nonblocking,
+        EventReactor& loop,
+        modern_io::ConnectionArenaSettings arena_settings)
+        : fd_(fd), loop_(&loop), arena_(modern_io::make_connection_arena(arena_settings)) {
         if (fd_ != invalid_socket && !already_nonblocking)
             set_socket_option(fd_, SocketOption::NonBlocking, 1);
     }
@@ -55,7 +87,7 @@ public:
 
     void close() {
         if (fd_ != invalid_socket) {
-            EventLoop::instance().deregister(fd_);
+            loop_->deregister(fd_);
 #ifdef _WIN32
             ::closesocket(fd_);
 #else
@@ -117,8 +149,15 @@ public:
 
     [[nodiscard]] auto native_handle() const noexcept { return fd_; }
 
+    [[nodiscard]] EventReactor& event_loop() noexcept { return *loop_; }
+    [[nodiscard]] const EventReactor& event_loop() const noexcept { return *loop_; }
+    [[nodiscard]] modern_io::ConnectionArena& connection_arena() noexcept { return *arena_; }
+    [[nodiscard]] const modern_io::ConnectionArena& connection_arena() const noexcept { return *arena_; }
+    [[nodiscard]] std::shared_ptr<modern_io::ConnectionArena> connection_arena_handle() const noexcept { return arena_; }
+
     [[nodiscard]] auto async_read(std::span<char> buf) {
-        return net_io::read_some_async(
+        return net_io::read_some_async_on(
+            *loop_,
             [this]() -> sock_t { return this->native_handle(); },
             [this, buf](sock_t&) -> std::expected<std::size_t, std::error_code> {
                 std::error_code ec;
@@ -130,7 +169,8 @@ public:
     }
 
     [[nodiscard]] auto async_write(std::span<const char> buf) {
-        return net_io::write_some_async(
+        return net_io::write_some_async_on(
+            *loop_,
             [this]() -> sock_t { return this->native_handle(); },
             [this, buf](sock_t&) -> std::expected<std::size_t, std::error_code> {
                 std::error_code ec;
@@ -192,7 +232,7 @@ public:
             }
 
             void await_suspend(std::coroutine_handle<> h) {
-                EventLoop::instance().register_write(fd, h);
+                self->event_loop().register_io(make_io_registration(fd, IOEvent::Write, h));
             }
 
             std::expected<void, std::error_code> await_resume() {
@@ -216,5 +256,7 @@ public:
     }
 private:
     sock_t fd_;
+    EventReactor* loop_;
+    std::shared_ptr<modern_io::ConnectionArena> arena_;
 };
 } // namespace net_io

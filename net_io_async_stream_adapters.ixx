@@ -22,6 +22,8 @@ export module net_io.async_stream_adapters;
 
 import net_io.async_tcp_socket;
 import net_io.async_udp_socket;
+import modern_io.connection_arena;
+import modern_io.async_buffered;
 import net_io.event_loop;
 import net_io.async_stream_base;
 import net_io_base;
@@ -34,16 +36,50 @@ export namespace net_io
 
 class AsyncTcpStreamAdapter : public AsyncStreamBase {
     std::shared_ptr<AsyncTcpSocket> socket_;
+    std::shared_ptr<modern_io::ConnectionArena> arena_;
+
+    static std::shared_ptr<modern_io::ConnectionArena>
+    normalize_arena(
+        const std::shared_ptr<AsyncTcpSocket>& socket,
+        std::shared_ptr<modern_io::ConnectionArena> arena) {
+        if (arena) {
+            return arena;
+        }
+        if (socket) {
+            auto socket_arena = socket->connection_arena_handle();
+            if (socket_arena) {
+                return socket_arena;
+            }
+        }
+        return std::make_shared<modern_io::ConnectionArena>();
+    }
+
 public:
-    explicit AsyncTcpStreamAdapter(std::shared_ptr<AsyncTcpSocket> sock)
-        : socket_(std::move(sock)) {}
+    explicit AsyncTcpStreamAdapter(
+        std::shared_ptr<AsyncTcpSocket> sock,
+        std::shared_ptr<modern_io::ConnectionArena> arena = {})
+        : socket_(std::move(sock)), arena_(normalize_arena(socket_, std::move(arena))) {}
+
+    [[nodiscard]] modern_io::ConnectionArena& connection_arena() noexcept { return *arena_; }
+    [[nodiscard]] const modern_io::ConnectionArena& connection_arena() const noexcept { return *arena_; }
+    [[nodiscard]] std::shared_ptr<modern_io::ConnectionArena> connection_arena_handle() const noexcept { return arena_; }
+
+    template<std::size_t BufSize = 8192>
+    [[nodiscard]] auto buffered_input() const {
+        return modern_io::AsyncBufferedInputStream<AsyncTcpStreamAdapter, BufSize>(*this, *arena_);
+    }
+
+    template<std::size_t BufSize = 8192>
+    [[nodiscard]] auto buffered_output() const {
+        return modern_io::AsyncBufferedOutputStream<AsyncTcpStreamAdapter, BufSize>(*this, *arena_);
+    }
 
     // Implement AsyncStreamBase by delegating to low-level read_some/write_some via async_utils
     [[nodiscard]] net_io::IoTask<std::expected<std::size_t, std::error_code>>
     read_async(std::span<char> buf) override {
         auto fd = socket_->native_handle();
-        auto start = [fd, owner = std::make_shared<int>(0)](std::coroutine_handle<> h) {
-            EventLoop::instance().register_read(fd, h, owner);
+        auto start = [fd, &loop = socket_->event_loop(), owner = std::make_shared<int>(0)](std::coroutine_handle<> h) {
+            loop.register_io(make_io_registration(fd, IOEvent::Read, h, owner));
         };
         auto finish = [socket = socket_, buf]() -> std::expected<std::size_t, std::error_code> {
             return socket->read_some(buf);
@@ -65,8 +101,8 @@ public:
     [[nodiscard]] net_io::IoTask<std::expected<std::size_t, std::error_code>>
     write_async(std::span<const char> buf) override {
         auto fd = socket_->native_handle();
-        auto start = [fd, owner = std::make_shared<int>(0)](std::coroutine_handle<> h) {
-            EventLoop::instance().register_write(fd, h, owner);
+        auto start = [fd, &loop = socket_->event_loop(), owner = std::make_shared<int>(0)](std::coroutine_handle<> h) {
+            loop.register_io(make_io_registration(fd, IOEvent::Write, h, owner));
         };
         auto finish = [socket = socket_, buf]() -> std::expected<std::size_t, std::error_code> {
             return socket->write_some(buf);
@@ -98,11 +134,45 @@ public:
 
 class AsyncUdpStreamAdapter : public AsyncStreamBase {
     std::shared_ptr<AsyncUdpSocket> socket_;
+    std::shared_ptr<modern_io::ConnectionArena> arena_;
     sockaddr_storage default_addr_{};
     socklen_t default_addrlen_{0};
+
+    static std::shared_ptr<modern_io::ConnectionArena>
+    normalize_arena(
+        const std::shared_ptr<AsyncUdpSocket>& socket,
+        std::shared_ptr<modern_io::ConnectionArena> arena) {
+        if (arena) {
+            return arena;
+        }
+        if (socket) {
+            auto socket_arena = socket->connection_arena_handle();
+            if (socket_arena) {
+                return socket_arena;
+            }
+        }
+        return std::make_shared<modern_io::ConnectionArena>();
+    }
+
 public:
-    explicit AsyncUdpStreamAdapter(std::shared_ptr<AsyncUdpSocket> sock)
-        : socket_(std::move(sock)) {}
+    explicit AsyncUdpStreamAdapter(
+        std::shared_ptr<AsyncUdpSocket> sock,
+        std::shared_ptr<modern_io::ConnectionArena> arena = {})
+        : socket_(std::move(sock)), arena_(normalize_arena(socket_, std::move(arena))) {}
+
+    [[nodiscard]] modern_io::ConnectionArena& connection_arena() noexcept { return *arena_; }
+    [[nodiscard]] const modern_io::ConnectionArena& connection_arena() const noexcept { return *arena_; }
+    [[nodiscard]] std::shared_ptr<modern_io::ConnectionArena> connection_arena_handle() const noexcept { return arena_; }
+
+    template<std::size_t BufSize = 8192>
+    [[nodiscard]] auto buffered_input() const {
+        return modern_io::AsyncBufferedInputStream<AsyncUdpStreamAdapter, BufSize>(*this, *arena_);
+    }
+
+    template<std::size_t BufSize = 8192>
+    [[nodiscard]] auto buffered_output() const {
+        return modern_io::AsyncBufferedOutputStream<AsyncUdpStreamAdapter, BufSize>(*this, *arena_);
+    }
 
     void set_default_target(const sockaddr_storage& addr, socklen_t len) {
         default_addr_ = addr;
@@ -131,6 +201,10 @@ public:
         return read_async(std::span<char>(reinterpret_cast<char*>(data.data()), data.size()));
     }
 
+    [[nodiscard]] net_io::IoTask<std::expected<std::size_t, std::error_code>> read_async(char* ptr, std::size_t n) {
+        return read_async(std::span<char>(ptr, n));
+    }
+
     // WRITE with retry logic for transient errors
     [[nodiscard]] net_io::IoTask<std::expected<std::size_t, std::error_code>> write_async(std::span<const char> data) override {
         if (!socket_->has_peer()) {
@@ -144,6 +218,9 @@ public:
     }
     [[nodiscard]] auto write_async(std::span<const std::byte> data) {
         return write_async(std::span<const char>(reinterpret_cast<const char*>(data.data()), data.size()));
+    }
+    [[nodiscard]] net_io::IoTask<std::expected<std::size_t, std::error_code>> write_async(const char* ptr, std::size_t n) {
+        return write_async(std::span<const char>(ptr, n));
     }
     [[nodiscard]] auto write_async(const std::string& s) {
         return write_async(std::span<const char>(s.data(), s.size()));

@@ -36,8 +36,8 @@ public:
         : fd_(fd), op_(std::move(op)), reg_(std::move(reg)), is_write_(is_write) {}
 
     ~GenericAwaiterImpl() {
-        if (net_io::EventLoop::instance().debug_enabled()) {
-            std::ostringstream oss; oss << "[GenericAwaiterImpl] dtor this=" << this << " fd=" << fd_; net_io::EventLoop::debug_log(oss.str());
+        if (runtime_debug_enabled()) {
+            std::ostringstream oss; oss << "[GenericAwaiterImpl] dtor this=" << this << " fd=" << fd_; runtime_debug_log(oss.str());
         }
     }
 
@@ -48,7 +48,7 @@ public:
 
     bool await_suspend(std::coroutine_handle<> h) {
         auto owner = self_.lock();
-        if (net_io::EventLoop::instance().debug_enabled()) {
+        if (runtime_debug_enabled()) {
             fprintf(stderr, "[GenericAwaiterImpl] await_suspend entry fd=%d this=%p self_ptr=%p\n",
                     fd_, (void*)this, owner.get());
         }
@@ -70,12 +70,12 @@ public:
         auto ec = r.error();
         if (is_would_block(ec)) {
             // Register for readiness
-            if (net_io::EventLoop::instance().debug_enabled()) {
+            if (runtime_debug_enabled()) {
                 std::ostringstream oss;
                 oss << "[GenericAwaiterImpl] await_suspend registering fd=" << fd_
                     << " handle=" << h.address()
                     << " self_ptr=" << owner.get();
-                net_io::EventLoop::debug_log(oss.str());
+                runtime_debug_log(oss.str());
             }
             reg_(fd_, h, owner);
 
@@ -107,12 +107,12 @@ public:
 
     std::expected<Ret,std::error_code> await_resume() noexcept {
         auto owner = self_.lock();
-        if (net_io::EventLoop::instance().debug_enabled()) {
-            std::ostringstream oss; oss << "[GenericAwaiterImpl] await_resume fd=" << fd_ << " this=" << this << " self_ptr=" << owner.get(); net_io::EventLoop::debug_log(oss.str());
+        if (runtime_debug_enabled()) {
+            std::ostringstream oss; oss << "[GenericAwaiterImpl] await_resume fd=" << fd_ << " this=" << this << " self_ptr=" << owner.get(); runtime_debug_log(oss.str());
         }
         if (!ready_) {
-            if (net_io::EventLoop::instance().debug_enabled()) {
-                std::ostringstream oss; oss << "[GenericAwaiterImpl] await_resume retry fd=" << fd_ << " self_ptr=" << owner.get(); net_io::EventLoop::debug_log(oss.str());
+            if (runtime_debug_enabled()) {
+                std::ostringstream oss; oss << "[GenericAwaiterImpl] await_resume retry fd=" << fd_ << " self_ptr=" << owner.get(); runtime_debug_log(oss.str());
             }
             auto r = op_(fd_);
             if (r) {
@@ -127,12 +127,12 @@ public:
 
     void retry(std::coroutine_handle<> h) {
         auto owner = self_.lock();
-        if (net_io::EventLoop::instance().debug_enabled()) {
+        if (runtime_debug_enabled()) {
             std::ostringstream oss;
             oss << "[GenericAwaiterImpl] retry fd=" << fd_
                 << " this=" << this
                 << " self_ptr=" << owner.get();
-            net_io::EventLoop::debug_log(oss.str());
+            runtime_debug_log(oss.str());
         }
 
         if (ready_) return;
@@ -147,12 +147,12 @@ public:
 
         auto ec = r.error();
     if (is_would_block(ec)) {
-            if (net_io::EventLoop::instance().debug_enabled()) {
+            if (runtime_debug_enabled()) {
                 std::ostringstream oss;
                 oss << "[GenericAwaiterImpl] retry register fd=" << fd_
                     << " handle=" << h.address()
                     << " self_ptr=" << owner.get();
-                net_io::EventLoop::debug_log(oss.str());
+                runtime_debug_log(oss.str());
             }
             reg_(fd_, h, owner);
             return;
@@ -178,10 +178,10 @@ public:
     }
     bool await_ready() noexcept { return impl_->await_ready(); }
     bool await_suspend(std::coroutine_handle<> h) {
-        if (net_io::EventLoop::instance().debug_enabled()) {
+        if (runtime_debug_enabled()) {
             std::ostringstream oss; oss << "[GenericAwaiter] await_suspend proxy impl_=" << impl_.get();
             try { if (impl_) oss << " impl_use_count=" << impl_.use_count(); } catch(...) {}
-            net_io::EventLoop::debug_log(oss.str());
+            runtime_debug_log(oss.str());
         }
         return impl_->await_suspend(h);
     }

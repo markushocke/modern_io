@@ -33,8 +33,8 @@ struct Task {
         struct init_suspend {
             bool await_ready() noexcept { return false; }
             void await_suspend(std::coroutine_handle<promise_type>) noexcept {
-                if (EventLoop::instance().debug_enabled()) {
-                    EventLoop::debug_log("[promise_type] initial_suspend called (init phase)");
+                if (runtime_debug_enabled()) {
+                    runtime_debug_log("[promise_type] initial_suspend called (init phase)");
                 }
             }
             void await_resume() noexcept {}
@@ -68,7 +68,7 @@ struct Task {
             write_ = write;
             std::ostringstream oss;
             oss << "[promise_type] set_io_metadata fd=" << fd << " write=" << write;
-            EventLoop::debug_log(oss.str());
+            runtime_debug_log(oss.str());
         }
     };
 
@@ -136,8 +136,8 @@ struct Task<void> {
         struct init_suspend {
             bool await_ready() noexcept { return false; }
             void await_suspend(std::coroutine_handle<promise_type>) noexcept {
-                if (EventLoop::instance().debug_enabled()) {
-                    EventLoop::debug_log("[promise_type for void] initial_suspend called (init phase)");
+                if (runtime_debug_enabled()) {
+                    runtime_debug_log("[promise_type for void] initial_suspend called (init phase)");
                 }
             }
             void await_resume() noexcept {}
@@ -168,7 +168,7 @@ struct Task<void> {
             write_ = write;
             std::ostringstream oss;
             oss << "[promise_type] set_io_metadata fd=" << fd << " write=" << write;
-            EventLoop::debug_log(oss.str());
+            runtime_debug_log(oss.str());
         }
     };
 

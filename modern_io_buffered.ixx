@@ -5,17 +5,20 @@ module;
 
 #ifndef _MSC_VER
 #include <vector>
+#include <memory_resource>
 #include <cstring>
 #include <span>
 #endif
 
 export module modern_io.buffered;
 import modern_io.concepts;
+export import modern_io.connection_arena;
 import modern_io.exceptions;
 // (imported above)
 
 #ifdef _MSC_VER
 import <vector>;
+import <memory_resource>;
 import <cstring>;
 import <span>;
 #endif
@@ -31,11 +34,14 @@ template<OutputStream S, std::size_t BufSize = 8192>
 class BufferedOutputStream
 {
 public:
-    explicit BufferedOutputStream(S sink)
-      : sink_(std::move(sink)), buffer_(), pos_(0)
+        explicit BufferedOutputStream(S sink, std::pmr::memory_resource* resource = std::pmr::get_default_resource())
+            : sink_(std::move(sink)), buffer_(resource), pos_(0)
     {
         buffer_.resize(BufSize);
     }
+
+    explicit BufferedOutputStream(S sink, ConnectionArena& arena)
+        : BufferedOutputStream(std::move(sink), arena.memory_resource()) {}
 
     BufferedOutputStream(BufferedOutputStream&& other) noexcept
       : sink_(std::move(other.sink_)), buffer_(std::move(other.buffer_)), pos_(other.pos_)
@@ -102,7 +108,7 @@ private:
     }
 
     S                  sink_;
-    std::vector<char>  buffer_;
+    std::pmr::vector<char> buffer_;
     std::size_t        pos_;
 };
 
@@ -114,11 +120,14 @@ template<InputStream S, std::size_t BufSize = 8192>
 class BufferedInputStream
 {
 public:
-    explicit BufferedInputStream(S source)
-      : source_(std::move(source)), buffer_(), pos_(0), end_(0)
+        explicit BufferedInputStream(S source, std::pmr::memory_resource* resource = std::pmr::get_default_resource())
+            : source_(std::move(source)), buffer_(resource), pos_(0), end_(0)
     {
         buffer_.resize(BufSize);
     }
+
+    explicit BufferedInputStream(S source, ConnectionArena& arena)
+        : BufferedInputStream(std::move(source), arena.memory_resource()) {}
 
     BufferedInputStream(BufferedInputStream&& other) noexcept
       : source_(std::move(other.source_)), buffer_(std::move(other.buffer_)), pos_(other.pos_), end_(other.end_)
@@ -178,12 +187,11 @@ public:
 
 private:
     S                  source_;
-    std::vector<char>  buffer_;
+    std::pmr::vector<char> buffer_;
     std::size_t        pos_;
     std::size_t        end_;
 };
 
-// CTAD helpers (synchron)
 template<typename Stream>
 BufferedOutputStream(Stream&&) -> BufferedOutputStream<std::decay_t<Stream>>;
 

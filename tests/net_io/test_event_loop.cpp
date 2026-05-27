@@ -111,6 +111,23 @@ SimpleTask test_pipe_reader(int fd, bool &out_flag) {
     co_await FdAwaitable{fd, out_flag};
 }
 
+struct IoRegistrationAwaitable {
+    EventLoop& loop;
+    int fd;
+    IOEvent events;
+    bool &resumed_flag;
+
+    bool await_ready() noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> h) noexcept {
+        loop.register_io(make_io_registration(fd, events, h));
+    }
+    void await_resume() noexcept { resumed_flag = true; }
+};
+
+SimpleTask test_io_registration(EventLoop& loop, int fd, IOEvent events, bool& out_flag) {
+    co_await IoRegistrationAwaitable{loop, fd, events, out_flag};
+}
+
 TEST(EventLoopTest, RegisterWithPipeResumesReader) {
     int fds[2];
     ASSERT_EQ(pipe(fds), 0);
@@ -134,6 +151,32 @@ TEST(EventLoopTest, RegisterWithPipeResumesReader) {
     loop.stop();
 
     close(r); close(w);
+
+    EXPECT_TRUE(resumed);
+}
+
+TEST(EventLoopTest, RegisterIoWithPipeResumesReaderOnLocalLoop) {
+    int fds[2];
+    ASSERT_EQ(pipe(fds), 0);
+    int r = fds[0];
+    int w = fds[1];
+
+    EventLoop loop;
+    loop.start();
+
+    bool resumed = false;
+    auto task = test_io_registration(loop, r, IOEvent::Read, resumed);
+
+    const char b = 'i';
+    ssize_t nw = write(w, &b, 1);
+    EXPECT_EQ(nw, 1);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    loop.stop();
+
+    close(r);
+    close(w);
 
     EXPECT_TRUE(resumed);
 }

@@ -29,6 +29,8 @@ module;
 
 export module net_io.event_loop;
 
+export import net_io.async_concepts;
+
 namespace net_io {
 
 struct FdWaiters {
@@ -40,7 +42,7 @@ struct FdWaiters {
         uint32_t current_mask{0}; // epoll registration mask
 };
 
-export class EventLoop {
+export class EventLoop final : public EventReactor {
 public:
     static EventLoop& instance() {
         static EventLoop loop;
@@ -146,8 +148,33 @@ public:
         wake();
     }
 
+    void register_io(const IoRegistration& registration) override {
+        if (has_event(registration.events, IOEvent::Read)
+            || has_event(registration.events, IOEvent::Error)
+            || has_event(registration.events, IOEvent::Hangup)) {
+#ifdef _WIN32
+            register_read(static_cast<int>(reinterpret_cast<std::uintptr_t>(registration.handle)), registration.resume_handle, registration.owner);
+#else
+            register_read(static_cast<int>(registration.handle), registration.resume_handle, registration.owner);
+#endif
+        }
+
+        if (has_event(registration.events, IOEvent::Write)) {
+#ifdef _WIN32
+            register_write(static_cast<int>(reinterpret_cast<std::uintptr_t>(registration.handle)), registration.resume_handle, registration.owner);
+#else
+            register_write(static_cast<int>(registration.handle), registration.resume_handle, registration.owner);
+#endif
+        }
+    }
+
+    template<NativeIoHandle T>
+    void register_io(T& io_device, IOEvent events, std::coroutine_handle<> resume_handle, std::shared_ptr<void> owner = {}) {
+        register_io(make_io_registration(io_device, events, resume_handle, std::move(owner)));
+    }
+
     // Remove all registrations for fd
-    void deregister(int fd) {
+    void deregister(int fd) override {
         if (fd < 0) return;
         std::scoped_lock lk(mtx_);
 #ifndef _WIN32
@@ -156,7 +183,10 @@ public:
         waiters_.erase(fd);
     }
 
-private:
+    [[nodiscard]] bool is_debug_enabled() const noexcept override {
+        return debug_enabled();
+    }
+
     EventLoop() {
 #ifndef _WIN32
         epoll_fd_ = ::epoll_create1(0);
@@ -181,6 +211,13 @@ private:
         if (epoll_fd_ >= 0) ::close(epoll_fd_);
 #endif
     }
+
+    EventLoop(const EventLoop&) = delete;
+    EventLoop& operator=(const EventLoop&) = delete;
+    EventLoop(EventLoop&&) = delete;
+    EventLoop& operator=(EventLoop&&) = delete;
+
+private:
 
     void run() {
     #ifndef _WIN32
@@ -484,5 +521,17 @@ private:
     std::thread worker_;
     std::atomic<bool> wake_pending_{false};
 };
+
+export [[nodiscard]] inline EventReactor& default_event_reactor() {
+    return EventLoop::instance();
+}
+
+export [[nodiscard]] inline bool runtime_debug_enabled() {
+    return default_event_reactor().is_debug_enabled();
+}
+
+export inline void runtime_debug_log(const std::string& message) {
+    EventLoop::debug_log(message);
+}
 
 } // namespace net_io

@@ -44,7 +44,7 @@ find_package(Threads REQUIRED)
 
 macro(add_module_target target)
     if (MSVC)
-        set_target_properties(${target} PROPERTIES 
+    set_target_properties(${target} PROPERTIES
             CXX_SCAN_FOR_MODULES YES
             CXX_MODULE_DIRECTORY "${CMAKE_CXX_MODULE_DIRECTORY}/${target}"
         )
@@ -61,6 +61,8 @@ target_sources(modern_io
       ${CMAKE_CURRENT_SOURCE_DIR}/modern_io.ixx
       ${CMAKE_CURRENT_SOURCE_DIR}/modern_io_exceptions.ixx
       ${CMAKE_CURRENT_SOURCE_DIR}/modern_io_concepts.ixx
+      ${CMAKE_CURRENT_SOURCE_DIR}/modern_io_connection_arena.ixx
+      ${CMAKE_CURRENT_SOURCE_DIR}/modern_io_trace.ixx
       ${CMAKE_CURRENT_SOURCE_DIR}/modern_io_file.ixx
       ${CMAKE_CURRENT_SOURCE_DIR}/modern_io_data.ixx
       ${CMAKE_CURRENT_SOURCE_DIR}/modern_io_buffered.ixx

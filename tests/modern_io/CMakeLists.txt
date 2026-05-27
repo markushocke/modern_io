@@ -20,9 +20,21 @@ gtest_discover_tests(test_modern_io_data)
 
 # Test for buffered
 add_executable(test_modern_io_buffered test_buffered.cpp)
-target_link_libraries(test_modern_io_buffered PRIVATE modern_io GTest::gtest_main)
+target_link_libraries(test_modern_io_buffered PRIVATE modern_io modern_io_async GTest::gtest_main)
 target_compile_features(test_modern_io_buffered PRIVATE cxx_std_23)
 gtest_discover_tests(test_modern_io_buffered)
+
+# Test for trace
+add_executable(test_modern_io_trace test_trace.cpp)
+target_link_libraries(test_modern_io_trace PRIVATE modern_io GTest::gtest_main)
+target_compile_features(test_modern_io_trace PRIVATE cxx_std_23)
+gtest_discover_tests(test_modern_io_trace)
+
+# Test for task
+add_executable(test_modern_io_task test_task.cpp)
+target_link_libraries(test_modern_io_task PRIVATE modern_io_async GTest::gtest_main)
+target_compile_features(test_modern_io_task PRIVATE cxx_std_23)
+gtest_discover_tests(test_modern_io_task)
 
 # Test for iostream
 add_executable(test_modern_io_iostream test_iostream.cpp)

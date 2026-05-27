@@ -4,6 +4,7 @@ module;
 
 #ifndef _MSC_VER
 #include <vector>
+#include <memory_resource>
 #include <cstring>
 #include <span>
 #include <expected>
@@ -13,10 +14,12 @@ module;
 
 export module modern_io.async_buffered;
 import modern_io.concepts;
+export import modern_io.connection_arena;
 import modern_io.task;
 
 #ifdef _MSC_VER
 import <vector>;
+import <memory_resource>;
 import <cstring>;
 import <span>;
 import <expected>;
@@ -32,8 +35,13 @@ template<AsyncOutputStream S, std::size_t BufSize = 8192>
 class AsyncBufferedOutputStream
 {
 public:
-    explicit AsyncBufferedOutputStream(S sink)
-        : sink_(std::move(sink)), buffer_(BufSize), pos_(0) {}
+    explicit AsyncBufferedOutputStream(S sink, std::pmr::memory_resource* resource = std::pmr::get_default_resource())
+        : sink_(std::move(sink)), buffer_(resource), pos_(0) {
+        buffer_.resize(BufSize);
+    }
+
+    explicit AsyncBufferedOutputStream(S sink, ConnectionArena& arena)
+        : AsyncBufferedOutputStream(std::move(sink), arena.memory_resource()) {}
 
     ExpectedTask<std::size_t> write_async(const char* data, std::size_t n) {
         std::size_t written = 0;
@@ -99,7 +107,7 @@ public:
 
 private:
     S                  sink_;
-    std::vector<char>  buffer_;
+    std::pmr::vector<char> buffer_;
     std::size_t        pos_;
 };
 
@@ -109,8 +117,13 @@ template<AsyncInputStream S, std::size_t BufSize = 8192>
 class AsyncBufferedInputStream
 {
 public:
-    explicit AsyncBufferedInputStream(S source)
-        : source_(std::move(source)), buffer_(BufSize), pos_(0), end_(0) {}
+    explicit AsyncBufferedInputStream(S source, std::pmr::memory_resource* resource = std::pmr::get_default_resource())
+        : source_(std::move(source)), buffer_(resource), pos_(0), end_(0) {
+        buffer_.resize(BufSize);
+    }
+
+    explicit AsyncBufferedInputStream(S source, ConnectionArena& arena)
+        : AsyncBufferedInputStream(std::move(source), arena.memory_resource()) {}
 
     ExpectedTask<std::size_t> read_async(char* out, std::size_t n) {
         std::size_t total = 0;
@@ -147,7 +160,7 @@ public:
 
 private:
     S                  source_;
-    std::vector<char>  buffer_;
+    std::pmr::vector<char> buffer_;
     std::size_t        pos_;
     std::size_t        end_;
 };

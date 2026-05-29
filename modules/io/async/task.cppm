@@ -25,21 +25,12 @@ namespace detail
 {
 [[nodiscard]] inline modern::runtime::TraceContext to_runtime_trace_context(const TraceContext& trace) noexcept
 {
-    modern::runtime::TraceContext context;
-    context.trace_id = trace.trace_id;
-    context.span_id = trace.span_id;
-    context.flags = trace.trace_flags;
-    return context;
+    return trace;
 }
 
 [[nodiscard]] inline TraceContext from_runtime_trace_context(const modern::runtime::TraceContext& trace) noexcept
 {
-    TraceContext context;
-    context.version = 0;
-    context.trace_id = trace.trace_id;
-    context.span_id = trace.span_id;
-    context.trace_flags = trace.flags;
-    return context;
+    return trace;
 }
 } // namespace detail
 

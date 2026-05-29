@@ -8,6 +8,7 @@ if(NOT modern_io_FIND_COMPONENTS)
   set(modern_io_FIND_COMPONENTS Core)
 endif()
 
+find_dependency(modern_trace CONFIG REQUIRED)
 find_dependency(Threads REQUIRED)
 
 include("${CMAKE_CURRENT_LIST_DIR}/modern_runtime_provider.cmake")

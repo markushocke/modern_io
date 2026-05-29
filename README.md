@@ -1,7 +1,7 @@
 # Modern IO
 
 A C++23 framework for type-safe I/O — files, networking, and async coroutine surfaces.  
-Built on modules, concepts, `std::expected`, and `modern_runtime` for the shared coroutine task core.
+Built on modules, concepts, `std::expected`, `modern_trace` for the shared trace contract, and `modern_runtime` for the coroutine task core.
 
 ---
 
@@ -17,8 +17,8 @@ net_io_async           EventLoop, awaiters, async sockets & server
 net_io_adapters        bridges net_io transports into modern_io streams
 ```
 
-Dependency rule: `modern_io_async` → `modern_io` + `modern_runtime`, `net_io_async` → `net_io` + `modern_io_async` + `modern_runtime`.  
-Sync and async are never mixed implicitly; coroutine ownership, frame PMR, trace propagation, and generic result tasks live in `modern_runtime`.
+Dependency rule: `modern_io` → `modern_trace`, `modern_io_async` → `modern_io` + `modern_runtime`, `net_io_async` → `net_io` + `modern_io_async` + `modern_runtime`.  
+Sync and async are never mixed implicitly; W3C trace parsing/formatting and trace drain primitives live in `modern_trace`, while coroutine ownership, frame PMR, trace propagation, and generic result tasks live in `modern_runtime`.
 
 `modern::io::ExpectedTask<T>` remains the I/O-facing name, but it is now a domain alias for `modern::runtime::ResultTask<T, std::error_code>`. `modern::net::Task<T>` and `modern::net::IoTask<T>` are aliases for `modern::runtime::Task<T>`.
 
@@ -43,7 +43,11 @@ Adapters, data streams, and buffering compose on top automatically.
 ```sh
 git clone https://github.com/markushocke/modern_io.git
 cd modern_io
-# Source builds fetch modern_runtime from GitHub by default.
+# Source builds resolve modern_trace automatically:
+# sibling ../modern_trace when present, otherwise GitHub fetch.
+# Override with -DMODERN_TRACE_PROVIDER=package|local|fetch
+# and -DMODERN_TRACE_ROOT=../modern_trace.
+# modern_runtime still defaults to GitHub fetch.
 # Alternatives: -DMODERN_RUNTIME_PROVIDER=local -DMODERN_RUNTIME_ROOT=../modern_runtime
 # or -DMODERN_RUNTIME_PROVIDER=package
 cmake -B build -G Ninja -DCMAKE_CXX_COMPILER=clang++
@@ -51,11 +55,11 @@ cmake --build build
 ```
 
 ```sh
-# Install modern_io and the co-built modern_runtime sibling package
+# Install modern_io and the co-built sibling packages modern_trace and modern_runtime
 cmake --install build --prefix /tmp/modern_io-install
 ```
 
-For installed async/canonical consumers, point `CMAKE_PREFIX_PATH` at the install prefix so CMake can resolve both sibling packages: `modern_io` and `modern_runtime`.
+For installed consumers, point `CMAKE_PREFIX_PATH` at the install prefix so CMake can resolve the sibling packages `modern_io`, `modern_trace`, and `modern_runtime`.
 
 ```cmake
 find_package(modern_io CONFIG REQUIRED)

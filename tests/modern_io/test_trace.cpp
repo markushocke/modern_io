@@ -50,7 +50,7 @@ modern_io::TraceContext make_trace_context() {
         std::byte{0x00}, std::byte{0xf0}, std::byte{0x67}, std::byte{0xaa},
         std::byte{0x0b}, std::byte{0xa9}, std::byte{0x02}, std::byte{0xb7},
     };
-    context.trace_flags = 0x01;
+    context.flags = 0x01;
     return context;
 }
 
@@ -62,7 +62,7 @@ TEST(TraceContextTest, ParsesValidTraceparent) {
 
     ASSERT_TRUE(parsed.has_value());
     EXPECT_EQ(parsed->version, 0x00);
-    EXPECT_EQ(parsed->trace_flags, 0x01);
+    EXPECT_EQ(parsed->flags, 0x01);
     EXPECT_FALSE(parsed->has_zero_trace_id());
     EXPECT_FALSE(parsed->has_zero_span_id());
     EXPECT_TRUE(parsed->is_valid());

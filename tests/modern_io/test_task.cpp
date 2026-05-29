@@ -67,7 +67,7 @@ static modern::io::TraceContext make_trace_context() {
         std::byte{0x00}, std::byte{0xf0}, std::byte{0x67}, std::byte{0xaa},
         std::byte{0x0b}, std::byte{0xa9}, std::byte{0x02}, std::byte{0xb7},
     };
-    context.trace_flags = 0x01;
+    context.flags = 0x01;
     return context;
 }
 

@@ -12,6 +12,19 @@ if(_IMPORT_PREFIX STREQUAL "/")
   set(_IMPORT_PREFIX "")
 endif()
 
+if(TARGET modern_trace::modern_trace)
+  set(_modern_trace_target modern_trace::modern_trace)
+elseif(TARGET modern_trace)
+  set(_modern_trace_target modern_trace)
+else()
+  message(FATAL_ERROR "modern_io::modern_all_canonical requires target modern_trace::modern_trace or modern_trace")
+endif()
+
+get_target_property(_modern_trace_source_root "${_modern_trace_target}" MODERN_TRACE_SOURCE_ROOT)
+if(NOT _modern_trace_source_root)
+  set(_modern_trace_source_root "${_IMPORT_PREFIX}/@CMAKE_INSTALL_INCLUDEDIR@/modern_trace")
+endif()
+
 if(TARGET modern_runtime::modern_runtime)
   set(_modern_runtime_target modern_runtime::modern_runtime)
 elseif(TARGET modern_runtime)
@@ -38,12 +51,13 @@ set_target_properties(modern_io::modern_all_canonical PROPERTIES
   CXX_EXTENSIONS "OFF"
   IMPORTED_CXX_MODULES_COMPILE_FEATURES "cxx_std_23"
   IMPORTED_CXX_MODULES_COMPILE_OPTIONS "-Wno-unused-command-line-argument;-Wno-unknown-warning-option;-Wno-missing-braces;-D__cpp_concepts=202002L;-Wno-builtin-macro-redefined"
-  IMPORTED_CXX_MODULES_LINK_LIBRARIES "Threads::Threads"
+  IMPORTED_CXX_MODULES_LINK_LIBRARIES "modern_trace::modern_trace;Threads::Threads"
   INTERFACE_COMPILE_FEATURES "cxx_std_23"
-  INTERFACE_LINK_LIBRARIES "${_IMPORT_PREFIX}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@modern_all_canonical@CMAKE_STATIC_LIBRARY_SUFFIX@;${_IMPORT_PREFIX}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@modern_io@CMAKE_STATIC_LIBRARY_SUFFIX@;${_IMPORT_PREFIX}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@modern_io_async@CMAKE_STATIC_LIBRARY_SUFFIX@;${_IMPORT_PREFIX}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@net_io@CMAKE_STATIC_LIBRARY_SUFFIX@;${_IMPORT_PREFIX}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@net_io_async@CMAKE_STATIC_LIBRARY_SUFFIX@;${_IMPORT_PREFIX}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@net_io_adapters@CMAKE_STATIC_LIBRARY_SUFFIX@;${_modern_runtime_target};Threads::Threads"
+  INTERFACE_LINK_LIBRARIES "${_IMPORT_PREFIX}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@modern_all_canonical@CMAKE_STATIC_LIBRARY_SUFFIX@;${_IMPORT_PREFIX}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@modern_io@CMAKE_STATIC_LIBRARY_SUFFIX@;${_IMPORT_PREFIX}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@modern_io_async@CMAKE_STATIC_LIBRARY_SUFFIX@;${_IMPORT_PREFIX}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@net_io@CMAKE_STATIC_LIBRARY_SUFFIX@;${_IMPORT_PREFIX}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@net_io_async@CMAKE_STATIC_LIBRARY_SUFFIX@;${_IMPORT_PREFIX}/@CMAKE_INSTALL_LIBDIR@/@CMAKE_STATIC_LIBRARY_PREFIX@net_io_adapters@CMAKE_STATIC_LIBRARY_SUFFIX@;modern_trace::modern_trace;${_modern_runtime_target};Threads::Threads"
 )
 
 _modern_io_set_imported_modules(modern_io::modern_all_canonical
+  "modern.trace=${_modern_trace_source_root}/modules/modern.trace.cppm"
   "modern_io=${_IMPORT_PREFIX}/@CMAKE_INSTALL_INCLUDEDIR@/@MODERN_IO_PACKAGE_NAME@/modules/io/modern_io.cppm"
   "modern.io=${_IMPORT_PREFIX}/@CMAKE_INSTALL_INCLUDEDIR@/@MODERN_IO_PACKAGE_NAME@/modules/io/modern.io.cppm"
   "modern_io.exceptions=${_IMPORT_PREFIX}/@CMAKE_INSTALL_INCLUDEDIR@/@MODERN_IO_PACKAGE_NAME@/modules/io/exceptions.cppm"
@@ -121,8 +135,10 @@ target_sources(modern_io::modern_all_canonical
     TYPE "CXX_MODULES"
     BASE_DIRS
       "${_IMPORT_PREFIX}/@CMAKE_INSTALL_INCLUDEDIR@/@MODERN_IO_PACKAGE_NAME@"
+      "${_modern_trace_source_root}"
       "${_modern_runtime_source_root}"
     FILES
+      "${_modern_trace_source_root}/modules/modern.trace.cppm"
       "${_IMPORT_PREFIX}/@CMAKE_INSTALL_INCLUDEDIR@/@MODERN_IO_PACKAGE_NAME@/modules/io/modern_io.cppm"
       "${_IMPORT_PREFIX}/@CMAKE_INSTALL_INCLUDEDIR@/@MODERN_IO_PACKAGE_NAME@/modules/io/modern.io.cppm"
       "${_IMPORT_PREFIX}/@CMAKE_INSTALL_INCLUDEDIR@/@MODERN_IO_PACKAGE_NAME@/modules/io/exceptions.cppm"

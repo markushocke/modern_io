@@ -5,6 +5,7 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/modern_runtime_provider.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/modern_trace_provider.cmake)
 
 set(MODERN_IO_PACKAGE_NAME modern_io)
 set(MODERN_IO_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/${MODERN_IO_PACKAGE_NAME}")
@@ -49,6 +50,20 @@ set_property(CACHE MODERN_RUNTIME_PROVIDER PROPERTY STRINGS package local fetch)
 set(MODERN_RUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../modern_runtime" CACHE PATH "Path to a local modern_runtime checkout")
 set(MODERN_RUNTIME_GIT_REPOSITORY "https://github.com/markushocke/modern_runtime.git" CACHE STRING "Git repository used when MODERN_RUNTIME_PROVIDER=fetch")
 set(MODERN_RUNTIME_GIT_TAG "main" CACHE STRING "Git tag or branch used when MODERN_RUNTIME_PROVIDER=fetch")
+set(MODERN_TRACE_PROVIDER "auto" CACHE STRING "How to resolve modern_trace: auto, package, local, or fetch")
+set_property(CACHE MODERN_TRACE_PROVIDER PROPERTY STRINGS auto package local fetch)
+set(MODERN_TRACE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../modern_trace" CACHE PATH "Path to a local modern_trace checkout")
+set(MODERN_TRACE_GIT_REPOSITORY "https://github.com/markushocke/modern_trace.git" CACHE STRING "Git repository used when MODERN_TRACE_PROVIDER=fetch")
+set(MODERN_TRACE_GIT_TAG "main" CACHE STRING "Git tag or branch used when MODERN_TRACE_PROVIDER=fetch")
+
+modern_io_resolve_trace_target(
+  MODERN_TRACE_TARGET
+  DEFAULT_PROVIDER "auto"
+  LOCAL_ROOT "${MODERN_TRACE_ROOT}"
+  FETCH_REPOSITORY "${MODERN_TRACE_GIT_REPOSITORY}"
+  FETCH_TAG "${MODERN_TRACE_GIT_TAG}"
+  BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/modern_trace"
+)
 
 modern_io_resolve_runtime_target(
   MODERN_RUNTIME_TARGET
@@ -92,7 +107,7 @@ target_sources(modern_io
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/iostream.cppm
 )
 target_compile_features(modern_io PUBLIC cxx_std_23)
-target_link_libraries(modern_io PUBLIC Threads::Threads)
+target_link_libraries(modern_io PUBLIC Threads::Threads ${MODERN_TRACE_TARGET})
 add_module_target(modern_io)
 add_library(modern_io::modern_io ALIAS modern_io)
 
@@ -290,7 +305,7 @@ target_sources(modern_all_canonical
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/net/async/tcp_server.cpp
 )
 target_compile_features(modern_all_canonical PUBLIC cxx_std_23)
-target_link_libraries(modern_all_canonical PUBLIC Threads::Threads ${MODERN_RUNTIME_PUBLIC_LINK})
+target_link_libraries(modern_all_canonical PUBLIC Threads::Threads ${MODERN_TRACE_TARGET} ${MODERN_RUNTIME_PUBLIC_LINK})
 add_module_target(modern_all_canonical)
 add_library(modern_io::modern_all_canonical ALIAS modern_all_canonical)
 

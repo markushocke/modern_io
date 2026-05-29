@@ -43,6 +43,8 @@ set(_modern_io_smoke_targets
 set(_modern_io_core_expected_files
   modern_runtime_provider.cmake
   modern_ioCoreTargets.cmake
+  ../modern_trace/modern_traceConfig.cmake
+  ../modern_trace/modern_traceTargets.cmake
 )
 
 set(_modern_io_async_expected_files
@@ -50,6 +52,8 @@ set(_modern_io_async_expected_files
   modern_ioCoreTargets.cmake
   modern_ioAsyncTargets.cmake
   modern_ioCanonicalTargets.cmake
+  ../modern_trace/modern_traceConfig.cmake
+  ../modern_trace/modern_traceTargets.cmake
   ../modern_runtime/modern_runtimeConfig.cmake
   ../modern_runtime/modern_runtimeTargets.cmake
 )

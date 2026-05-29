@@ -40,7 +40,7 @@ endif()
 
 set(_install_cmd
   "@CMAKE_COMMAND@"
-  --install "@CMAKE_BINARY_DIR@"
+  --install "@IOProject_BINARY_DIR@"
   --prefix "${_install_prefix}"
 )
 if(NOT _test_config STREQUAL "")

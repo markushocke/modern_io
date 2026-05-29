@@ -282,7 +282,7 @@ See [TESTING.md](TESTING.md) and [UNITTEST_SUMMARY.md](UNITTEST_SUMMARY.md) for 
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Apache License 2.0 — see [LICENSE](LICENSE).
 
 ---
 

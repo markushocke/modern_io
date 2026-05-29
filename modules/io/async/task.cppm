@@ -17,23 +17,10 @@ export import <system_error>;
 export module modern_io.task;
 
 import modern.runtime;
-import modern_io.trace;
+import modern.trace;
 
 export namespace modern::io
 {
-namespace detail
-{
-[[nodiscard]] inline modern::runtime::TraceContext to_runtime_trace_context(const TraceContext& trace) noexcept
-{
-    return trace;
-}
-
-[[nodiscard]] inline TraceContext from_runtime_trace_context(const modern::runtime::TraceContext& trace) noexcept
-{
-    return trace;
-}
-} // namespace detail
-
 class ExpectedTaskMemoryResourcePolicy : public modern::runtime::TaskEnvironmentPolicy
 {
 public:
@@ -52,14 +39,14 @@ class ExpectedTaskTraceContextPolicy : public modern::runtime::TaskEnvironmentPo
 {
 public:
     virtual ~ExpectedTaskTraceContextPolicy() = default;
-    [[nodiscard]] virtual std::optional<TraceContext> get_trace_context() noexcept = 0;
+    [[nodiscard]] virtual std::optional<modern::trace::TraceContext> get_trace_context() noexcept = 0;
 
     modern::runtime::TaskEnvironment current_environment() noexcept override
     {
         modern::runtime::TaskEnvironment environment;
 
         if (auto trace = get_trace_context())
-            environment.trace_context = detail::to_runtime_trace_context(*trace);
+            environment.trace_context = *trace;
 
         return environment;
     }
@@ -127,20 +114,20 @@ public:
         auto runtime_trace = runtime_awaiter.await_resume();
 
         if (runtime_trace)
-            trace_context_ = detail::from_runtime_trace_context(*runtime_trace);
+            trace_context_ = *runtime_trace;
         else
             trace_context_.reset();
 
         return false;
     }
 
-    [[nodiscard]] std::optional<TraceContext> await_resume() const noexcept
+    [[nodiscard]] std::optional<modern::trace::TraceContext> await_resume() const noexcept
     {
         return trace_context_;
     }
 
 private:
-    std::optional<TraceContext> trace_context_;
+    std::optional<modern::trace::TraceContext> trace_context_;
 };
 
 [[nodiscard]] inline CurrentTraceContextAwaiter current_trace_context() noexcept

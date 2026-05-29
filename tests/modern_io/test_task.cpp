@@ -43,19 +43,19 @@ private:
 
 class FixedTraceContextPolicy final : public modern::io::ExpectedTaskTraceContextPolicy {
 public:
-    explicit FixedTraceContextPolicy(std::optional<modern::io::TraceContext> trace_context) noexcept
+    explicit FixedTraceContextPolicy(std::optional<modern::trace::TraceContext> trace_context) noexcept
         : trace_context_(std::move(trace_context)) {}
 
-    std::optional<modern::io::TraceContext> get_trace_context() noexcept override {
+    std::optional<modern::trace::TraceContext> get_trace_context() noexcept override {
         return trace_context_;
     }
 
 private:
-    std::optional<modern::io::TraceContext> trace_context_;
+    std::optional<modern::trace::TraceContext> trace_context_;
 };
 
-static modern::io::TraceContext make_trace_context() {
-    modern::io::TraceContext context;
+static modern::trace::TraceContext make_trace_context() {
+    modern::trace::TraceContext context;
     context.version = 0x00;
     context.trace_id = {
         std::byte{0x4b}, std::byte{0xf9}, std::byte{0x2f}, std::byte{0x35},
@@ -71,7 +71,7 @@ static modern::io::TraceContext make_trace_context() {
     return context;
 }
 
-static modern::io::TraceContext make_alternate_trace_context() {
+static modern::trace::TraceContext make_alternate_trace_context() {
     auto context = make_trace_context();
     context.span_id[7] = std::byte{0x55};
     return context;
@@ -81,13 +81,13 @@ static ExpectedTask<int> make_expected_value_task(int value) {
     co_return std::expected<int, std::error_code>{ value };
 }
 
-static ExpectedTask<std::optional<modern::io::TraceContext>> read_current_trace_context_task() {
-    co_return std::expected<std::optional<modern::io::TraceContext>, std::error_code>{
+static ExpectedTask<std::optional<modern::trace::TraceContext>> read_current_trace_context_task() {
+    co_return std::expected<std::optional<modern::trace::TraceContext>, std::error_code>{
         co_await modern::io::current_trace_context()
     };
 }
 
-static ExpectedTask<std::optional<modern::io::TraceContext>> read_child_trace_context_task() {
+static ExpectedTask<std::optional<modern::trace::TraceContext>> read_child_trace_context_task() {
     co_return co_await read_current_trace_context_task();
 }
 

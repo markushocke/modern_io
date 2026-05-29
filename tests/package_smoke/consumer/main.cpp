@@ -8,7 +8,7 @@ import modern.net.adapters;
 
 int main() {
     modern::io::ConnectionArena arena;
-    modern::io::TraceContext trace;
+    modern::trace::TraceContext trace;
     modern::net::TcpEndpoint endpoint{"127.0.0.1", 9000};
     auto tcp_socket = std::make_shared<modern::net::AsyncTcpSocket>();
     auto udp_socket = std::make_shared<modern::net::AsyncUdpSocket>();

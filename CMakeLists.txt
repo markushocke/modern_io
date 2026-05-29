@@ -100,7 +100,6 @@ target_sources(modern_io
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/exceptions.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/concepts.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/connection_arena.cppm
-      ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/trace.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/file.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/data.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/buffered.cppm
@@ -262,7 +261,6 @@ target_sources(modern_all_canonical
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/exceptions.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/concepts.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/connection_arena.cppm
-      ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/trace.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/file.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/data.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/buffered.cppm

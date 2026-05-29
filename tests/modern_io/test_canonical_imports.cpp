@@ -14,7 +14,7 @@ TEST(CanonicalImportsTest, CanonicalUmbrellasExposeExistingSurface) {
     co_return 11;
   };
   modern::io::ConnectionArena arena;
-  modern::io::TraceContext context;
+  modern::trace::TraceContext context;
   auto ipc_transport_size = sizeof(modern::net::IPCTransport);
   auto tcp_client_size = sizeof(modern::net::TcpClient);
   auto tcp_server_size = sizeof(modern::net::TcpServer);

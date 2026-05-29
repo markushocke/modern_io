@@ -1,7 +1,7 @@
 # Modern IO
 
-A C++23 framework for type-safe I/O — files, networking, and async coroutines.  
-Built on modules, concepts, `std::expected`, and zero external runtime dependencies.
+A C++23 framework for type-safe I/O — files, networking, and async coroutine surfaces.  
+Built on modules, concepts, `std::expected`, and `modern_runtime` for the shared coroutine task core.
 
 ---
 
@@ -17,8 +17,10 @@ net_io_async           EventLoop, awaiters, async sockets & server
 net_io_adapters        bridges net_io transports into modern_io streams
 ```
 
-Dependency rule: `modern_io_async` → `modern_io`, `net_io_async` → `net_io`.  
-Sync and async are never mixed implicitly.
+Dependency rule: `modern_io_async` → `modern_io` + `modern_runtime`, `net_io_async` → `net_io` + `modern_io_async` + `modern_runtime`.  
+Sync and async are never mixed implicitly; coroutine ownership, frame PMR, trace propagation, and generic result tasks live in `modern_runtime`.
+
+`modern::io::ExpectedTask<T>` remains the I/O-facing name, but it is now a domain alias for `modern::runtime::ResultTask<T, std::error_code>`. `modern::net::Task<T>` and `modern::net::IoTask<T>` are aliases for `modern::runtime::Task<T>`.
 
 ### Concept layers
 
@@ -41,14 +43,19 @@ Adapters, data streams, and buffering compose on top automatically.
 ```sh
 git clone https://github.com/markushocke/modern_io.git
 cd modern_io
+# Source builds fetch modern_runtime from GitHub by default.
+# Alternatives: -DMODERN_RUNTIME_PROVIDER=local -DMODERN_RUNTIME_ROOT=../modern_runtime
+# or -DMODERN_RUNTIME_PROVIDER=package
 cmake -B build -G Ninja -DCMAKE_CXX_COMPILER=clang++
 cmake --build build
 ```
 
 ```sh
-# Install
+# Install modern_io and the co-built modern_runtime sibling package
 cmake --install build --prefix /tmp/modern_io-install
 ```
+
+For installed async/canonical consumers, point `CMAKE_PREFIX_PATH` at the install prefix so CMake can resolve both sibling packages: `modern_io` and `modern_runtime`.
 
 ```cmake
 find_package(modern_io CONFIG REQUIRED)
@@ -57,6 +64,10 @@ target_link_libraries(app PRIVATE
     modern_io::net_io
     # modern_io::modern_io_async  modern_io::net_io_async   # opt-in
 )
+```
+
+```sh
+cmake -S consumer -B consumer-build -DCMAKE_PREFIX_PATH=/tmp/modern_io-install
 ```
 
 Requires C++23 (Clang recommended) and CMake 3.28+.

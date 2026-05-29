@@ -60,14 +60,14 @@ auto sync_run_timeout(Awaitable awaitable, int ms) {
     throw std::runtime_error("timeout");
 }
 
-static Task<void> accept_and_echo_once(net_io::AsyncTcpServer& server) {
+static Task<void> accept_and_echo_once(modern::net::AsyncTcpServer& server) {
     auto asp = co_await server.accept();
     EXPECT_TRUE((bool)asp);
     auto server_sock = asp.value();
 
     char buf[5];
 
-    net_io::AsyncTcpStreamAdapter stream(server_sock);
+    modern::net::AsyncTcpStreamAdapter stream(server_sock);
     auto r = co_await stream.read_exact_async(std::span<char>(buf, 5));
     EXPECT_TRUE((bool)r);
     EXPECT_EQ(std::string(buf, 5), "hello");
@@ -76,13 +76,13 @@ static Task<void> accept_and_echo_once(net_io::AsyncTcpServer& server) {
     EXPECT_TRUE((bool)w);
 }
 
-static Task<void> accept_and_echo_buffered_once(net_io::AsyncTcpServer& server) {
+static Task<void> accept_and_echo_buffered_once(modern::net::AsyncTcpServer& server) {
     auto asp = co_await server.accept();
     EXPECT_TRUE((bool)asp);
     auto server_sock = asp.value();
     EXPECT_NE(server_sock->connection_arena_handle(), nullptr);
 
-    net_io::AsyncTcpStreamAdapter stream(server_sock);
+    modern::net::AsyncTcpStreamAdapter stream(server_sock);
     EXPECT_EQ(stream.connection_arena_handle().get(), server_sock->connection_arena_handle().get());
     auto input = stream.buffered_input<64>();
     auto output = stream.buffered_output<64>();
@@ -112,7 +112,7 @@ static Task<void> accept_and_echo_buffered_once(net_io::AsyncTcpServer& server) 
 }
 
 static Task<void> accept_and_check_connection_arena_settings(
-    net_io::AsyncTcpServer& server,
+    modern::net::AsyncTcpServer& server,
     std::size_t expected_initial_buffer_size) {
     auto asp = co_await server.accept();
     EXPECT_TRUE((bool)asp);
@@ -124,7 +124,7 @@ static Task<void> accept_and_check_connection_arena_settings(
     EXPECT_NE(server_sock->connection_arena_handle(), nullptr);
     EXPECT_EQ(server_sock->connection_arena().initial_buffer_size(), expected_initial_buffer_size);
 
-    net_io::AsyncTcpStreamAdapter stream(server_sock);
+    modern::net::AsyncTcpStreamAdapter stream(server_sock);
     EXPECT_EQ(stream.connection_arena_handle().get(), server_sock->connection_arena_handle().get());
 }
 
@@ -137,7 +137,7 @@ TEST(AsyncTcpTest, AcceptAndEcho) {
     loop.start();
 
     // Start the TCP server
-    net_io::AsyncTcpServer server;
+    modern::net::AsyncTcpServer server;
     uint16_t port = net_io::get_free_tcp_port();
     net_io::TcpEndpoint server_ep("127.0.0.1", port);
     auto start_res = server.start(server_ep, 1);
@@ -185,7 +185,7 @@ TEST(AsyncTcpTest, AcceptAndEchoWithInjectedLoop) {
     net_io::EventLoop loop;
     loop.start();
 
-    net_io::AsyncTcpServer server(loop);
+    modern::net::AsyncTcpServer server(loop);
     uint16_t port = net_io::get_free_tcp_port();
     net_io::TcpEndpoint server_ep("127.0.0.1", port);
     auto start_res = server.start(server_ep, 1);
@@ -254,7 +254,7 @@ TEST(AsyncTcpTest, AsyncConnectWithInjectedLoop) {
         return accepted;
     });
 
-    net_io::AsyncTcpSocket client(loop);
+    modern::net::AsyncTcpSocket client(loop);
     sockaddr_storage target{};
     auto* target_in = reinterpret_cast<sockaddr_in*>(&target);
     target_in->sin_family = AF_INET;
@@ -279,7 +279,7 @@ TEST(AsyncTcpTest, AcceptUsesConfiguredConnectionArenaSettings) {
     loop.start();
 
     CountingMemoryResource upstream;
-    net_io::AsyncTcpServer server(loop, modern_io::ConnectionArenaSettings{256, &upstream});
+    modern::net::AsyncTcpServer server(loop, modern_io::ConnectionArenaSettings{256, &upstream});
     uint16_t port = net_io::get_free_tcp_port();
     net_io::TcpEndpoint server_ep("127.0.0.1", port);
     auto start_res = server.start(server_ep, 1);
@@ -315,7 +315,7 @@ TEST(AsyncTcpTest, BufferedAdapterUsesSharedConnectionArena) {
     net_io::EventLoop loop;
     loop.start();
 
-    net_io::AsyncTcpServer server(loop);
+    modern::net::AsyncTcpServer server(loop);
     uint16_t port = net_io::get_free_tcp_port();
     net_io::TcpEndpoint server_ep("127.0.0.1", port);
     auto start_res = server.start(server_ep, 1);
@@ -360,7 +360,7 @@ TEST(AsyncTcpTest, StopClearsPendingAcceptRegistration) {
     net_io::EventLoop& loop = net_io::EventLoop::instance();
     loop.start();
 
-    net_io::AsyncTcpServer first_server;
+    modern::net::AsyncTcpServer first_server;
     uint16_t first_port = net_io::get_free_tcp_port();
     auto first_start = first_server.start(net_io::TcpEndpoint("127.0.0.1", first_port), 1);
     ASSERT_TRUE((bool)first_start);
@@ -375,7 +375,7 @@ TEST(AsyncTcpTest, StopClearsPendingAcceptRegistration) {
 
     bool reused_fd = false;
     for (int attempt = 0; attempt < 16 && !reused_fd; ++attempt) {
-        net_io::AsyncTcpServer second_server;
+        modern::net::AsyncTcpServer second_server;
         uint16_t second_port = net_io::get_free_tcp_port();
         auto second_start = second_server.start(net_io::TcpEndpoint("127.0.0.1", second_port), 1);
         ASSERT_TRUE((bool)second_start);

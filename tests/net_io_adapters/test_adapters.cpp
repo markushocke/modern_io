@@ -5,6 +5,8 @@ import net_io_adapters;
 
 using namespace net_io_adapters;
 
+static_assert(std::same_as<modern::net::adapters::SharedStream<std::stringstream>, net_io_adapters::SharedStream<std::stringstream>>);
+
 TEST(AdaptersTest, SharedStreamStringStream) {
     // Use a stringstream as a simple transport and wrap it with SharedStream
     auto ss = std::make_shared<std::stringstream>();
@@ -20,4 +22,12 @@ TEST(AdaptersTest, SharedStreamStringStream) {
     // Read back directly from the stringstream
     std::string out = ss->str();
     EXPECT_EQ(out, "hello");
+}
+
+TEST(AdaptersTest, CanonicalAdapterNamespaceWorks) {
+    auto ss = std::make_shared<std::stringstream>();
+    modern::net::adapters::SharedStream<std::stringstream> shared(ss);
+    shared.write("ok", 2);
+    shared.flush();
+    EXPECT_EQ(ss->str(), "ok");
 }

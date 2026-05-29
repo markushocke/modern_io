@@ -41,3 +41,18 @@ add_executable(test_modern_io_iostream test_iostream.cpp)
 target_link_libraries(test_modern_io_iostream PRIVATE modern_io GTest::gtest_main)
 target_compile_features(test_modern_io_iostream PRIVATE cxx_std_23)
 gtest_discover_tests(test_modern_io_iostream)
+
+# Test for canonical modern.* imports
+add_executable(test_modern_io_canonical_imports test_canonical_imports.cpp)
+target_link_libraries(
+	test_modern_io_canonical_imports
+	PRIVATE
+		modern_io_canonical
+		modern_io_async_canonical
+		modern_net_canonical
+		modern_net_async_canonical
+		modern_net_adapters_canonical
+		GTest::gtest_main
+)
+target_compile_features(test_modern_io_canonical_imports PRIVATE cxx_std_23)
+gtest_discover_tests(test_modern_io_canonical_imports)

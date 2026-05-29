@@ -2,39 +2,56 @@
 
 include(CMakeFindDependencyMacro)
 
+set(modern_io_SUPPORTED_COMPONENTS Core Async Canonical)
+
+if(NOT modern_io_FIND_COMPONENTS)
+  set(modern_io_FIND_COMPONENTS Core)
+endif()
+
 find_dependency(Threads REQUIRED)
 
-include("${CMAKE_CURRENT_LIST_DIR}/modern_ioTargets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/modern_runtime_provider.cmake")
 
-# Restore explicit inter-target module dependencies for installed consumers.
-if(TARGET modern_io::modern_io)
-	set_property(TARGET modern_io::modern_io PROPERTY
-		IMPORTED_CXX_MODULES_LINK_LIBRARIES "Threads::Threads"
-	)
+set(modern_io_Core_FOUND FALSE)
+set(modern_io_Async_FOUND FALSE)
+set(modern_io_Canonical_FOUND FALSE)
+
+include("${CMAKE_CURRENT_LIST_DIR}/modern_ioCoreTargets.cmake")
+set(modern_io_Core_FOUND TRUE)
+
+list(FIND modern_io_FIND_COMPONENTS Async _modern_io_find_async)
+list(FIND modern_io_FIND_COMPONENTS Canonical _modern_io_find_canonical)
+if(NOT _modern_io_find_async EQUAL -1 OR NOT _modern_io_find_canonical EQUAL -1)
+  if(NOT DEFINED MODERN_RUNTIME_PROVIDER OR MODERN_RUNTIME_PROVIDER STREQUAL "" OR MODERN_RUNTIME_PROVIDER STREQUAL "package")
+    find_dependency(modern_runtime CONFIG REQUIRED)
+    if(TARGET modern_runtime::modern_runtime)
+      modern_io_prepare_runtime_target(modern_runtime::modern_runtime)
+      set(MODERN_IO_RUNTIME_TARGET modern_runtime::modern_runtime)
+    elseif(TARGET modern_runtime)
+      modern_io_prepare_runtime_target(modern_runtime)
+      set(MODERN_IO_RUNTIME_TARGET modern_runtime)
+    else()
+      message(FATAL_ERROR "modern_runtime package did not define target modern_runtime::modern_runtime or modern_runtime")
+    endif()
+  else()
+    modern_io_resolve_runtime_target(
+      MODERN_IO_RUNTIME_TARGET
+      DEFAULT_PROVIDER "package"
+      FETCH_REPOSITORY "@MODERN_RUNTIME_GIT_REPOSITORY@"
+      FETCH_TAG "@MODERN_RUNTIME_GIT_TAG@"
+      BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/modern_runtime"
+    )
+  endif()
 endif()
 
-if(TARGET modern_io::modern_io_async)
-	set_property(TARGET modern_io::modern_io_async PROPERTY
-		IMPORTED_CXX_MODULES_LINK_LIBRARIES "modern_io::modern_io;Threads::Threads"
-	)
+if(NOT _modern_io_find_async EQUAL -1)
+  include("${CMAKE_CURRENT_LIST_DIR}/modern_ioAsyncTargets.cmake")
+  set(modern_io_Async_FOUND TRUE)
 endif()
 
-if(TARGET modern_io::net_io)
-	set_property(TARGET modern_io::net_io PROPERTY
-		IMPORTED_CXX_MODULES_LINK_LIBRARIES "modern_io::modern_io;Threads::Threads"
-	)
-endif()
-
-if(TARGET modern_io::net_io_async)
-	set_property(TARGET modern_io::net_io_async PROPERTY
-		IMPORTED_CXX_MODULES_LINK_LIBRARIES "modern_io::net_io;modern_io::modern_io_async;Threads::Threads"
-	)
-endif()
-
-if(TARGET modern_io::net_io_adapters)
-	set_property(TARGET modern_io::net_io_adapters PROPERTY
-		IMPORTED_CXX_MODULES_LINK_LIBRARIES "modern_io::modern_io;modern_io::net_io;Threads::Threads"
-	)
+if(NOT _modern_io_find_canonical EQUAL -1)
+  include("${CMAKE_CURRENT_LIST_DIR}/modern_ioCanonicalTargets.cmake")
+  set(modern_io_Canonical_FOUND TRUE)
 endif()
 
 check_required_components(modern_io)

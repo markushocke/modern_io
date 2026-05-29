@@ -6,8 +6,37 @@ set(_install_prefix "@MODERN_IO_PACKAGE_SMOKE_INSTALL_PREFIX@")
 set(_package_dir "@MODERN_IO_PACKAGE_SMOKE_PACKAGE_DIR@")
 set(_consumer_source_dir "@MODERN_IO_PACKAGE_SMOKE_SOURCE_DIR@")
 set(_consumer_build_dir "@MODERN_IO_PACKAGE_SMOKE_BUILD_DIR@")
+set(_package_build_targets "@MODERN_IO_PACKAGE_SMOKE_BUILD_TARGETS@")
+set(_consumer_configure_args "@MODERN_IO_PACKAGE_SMOKE_CONFIGURE_ARGS@")
+set(_expected_package_files "@MODERN_IO_PACKAGE_SMOKE_EXPECTED_FILES@")
 
 file(REMOVE_RECURSE "${_install_prefix}" "${_consumer_build_dir}")
+
+set(_package_build_cmd
+  "@CMAKE_COMMAND@"
+  --build "@CMAKE_BINARY_DIR@"
+  --target
+)
+foreach(_package_target IN LISTS _package_build_targets)
+  list(APPEND _package_build_cmd "${_package_target}")
+endforeach()
+if(NOT _test_config STREQUAL "")
+  list(APPEND _package_build_cmd --config "${_test_config}")
+endif()
+
+execute_process(
+  COMMAND ${_package_build_cmd}
+  RESULT_VARIABLE _package_build_result
+  OUTPUT_VARIABLE _package_build_stdout
+  ERROR_VARIABLE _package_build_stderr
+)
+if(NOT _package_build_result EQUAL 0)
+  message(FATAL_ERROR
+    "modern_io package pre-build failed.\n"
+    "stdout:\n${_package_build_stdout}\n"
+    "stderr:\n${_package_build_stderr}"
+  )
+endif()
 
 set(_install_cmd
   "@CMAKE_COMMAND@"
@@ -38,11 +67,14 @@ endif()
 if(NOT EXISTS "${_package_dir}/modern_ioConfigVersion.cmake")
   message(FATAL_ERROR "Installed package version file is missing: ${_package_dir}/modern_ioConfigVersion.cmake")
 endif()
-if(NOT EXISTS "${_package_dir}/modern_ioTargets.cmake")
-  message(FATAL_ERROR "Installed targets file is missing: ${_package_dir}/modern_ioTargets.cmake")
-endif()
 
-file(READ "${_package_dir}/modern_ioTargets.cmake" _targets_file_contents)
+foreach(_expected_file IN LISTS _expected_package_files)
+  if(NOT EXISTS "${_package_dir}/${_expected_file}")
+    message(FATAL_ERROR "Installed package file is missing: ${_package_dir}/${_expected_file}")
+  endif()
+endforeach()
+
+file(READ "${_package_dir}/modern_ioCoreTargets.cmake" _targets_file_contents)
 if(NOT _targets_file_contents MATCHES "FILE_SET \"cxx_modules\"")
   message(FATAL_ERROR "Installed package does not export the expected cxx_modules file sets.")
 endif()
@@ -52,6 +84,7 @@ set(_configure_cmd
   -S "${_consumer_source_dir}"
   -B "${_consumer_build_dir}"
   -G "@CMAKE_GENERATOR@"
+  "-DCMAKE_PREFIX_PATH=${_install_prefix}"
   "-Dmodern_io_DIR=${_package_dir}"
   "-DCMAKE_CXX_COMPILER=@CMAKE_CXX_COMPILER@"
 )
@@ -68,6 +101,9 @@ endif()
 if("@CMAKE_CONFIGURATION_TYPES@" STREQUAL "")
   list(APPEND _configure_cmd "-DCMAKE_BUILD_TYPE=@CMAKE_BUILD_TYPE@")
 endif()
+foreach(_configure_arg IN LISTS _consumer_configure_args)
+  list(APPEND _configure_cmd "${_configure_arg}")
+endforeach()
 
 execute_process(
   COMMAND ${_configure_cmd}

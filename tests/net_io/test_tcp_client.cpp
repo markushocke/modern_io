@@ -40,7 +40,7 @@ TEST(TcpClientTest, ConnectAndExchange) {
         } catch (...) {}
     });
 
-    TcpClient client(TcpEndpoint("127.0.0.1", port));
+    modern::net::TcpClient client(modern::net::TcpEndpoint("127.0.0.1", port));
     client.open();
     const char* send = "abcde";
     client.write(send, 5);
@@ -52,3 +52,5 @@ TEST(TcpClientTest, ConnectAndExchange) {
     server.stop();
     if (srv.joinable()) srv.join();
 }
+
+static_assert(std::same_as<modern::net::TcpClient, net_io::TcpClient>);

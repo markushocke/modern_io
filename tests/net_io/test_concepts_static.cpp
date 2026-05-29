@@ -1,6 +1,9 @@
 // Compile-time concept / API presence checks
 import net_io_concepts;
 import net_io.ipc_transport;
+import net_io.tcp_client;
+import net_io.tcp_server;
+import net_io.udp_endpoint;
 import net_io.async_tcp_socket;
 import net_io.async_stream_adapters;
 import net_io.async_utils;
@@ -13,12 +16,18 @@ import modern_io.concepts;
 // No runtime code required — this test is purely compile-time.
 // Keep it as a test executable so CMake compiles it with project module imports.
 
-static_assert(net_io_concepts::Readable<net_io::IPCTransport>, "IPCTransport must be Readable");
-static_assert(net_io_concepts::Writable<net_io::IPCTransport>, "IPCTransport must be Writable");
+static_assert(net_io_concepts::Readable<modern::net::IPCTransport>, "IPCTransport must be Readable");
+static_assert(net_io_concepts::Writable<modern::net::IPCTransport>, "IPCTransport must be Writable");
+static_assert(std::same_as<modern::net::IPCTransport, net_io::IPCTransport>, "Legacy IPCTransport name must remain compatible");
+static_assert(net_io_concepts::Transportable<modern::net::TcpClient>, "TcpClient must remain Transportable");
+static_assert(std::same_as<modern::net::TcpClient, net_io::TcpClient>, "Legacy TcpClient name must remain compatible");
+static_assert(net_io_concepts::Acceptable<modern::net::TcpServer>, "TcpServer must remain Acceptable");
+static_assert(std::same_as<modern::net::TcpServer, net_io::TcpServer>, "Legacy TcpServer name must remain compatible");
+static_assert(std::same_as<modern::net::UdpEndpoint, net_io::UdpEndpoint>, "Legacy UdpEndpoint name must remain compatible");
 
 // Check AsyncTcpSocket exposes async_read(std::span<char>) and async_write(std::span<const char>)
 static_assert(
-    requires(net_io::AsyncTcpSocket& s, std::span<char> buf) {
+    requires(modern::net::AsyncTcpSocket& s, std::span<char> buf) {
         { s.read_some(buf) } -> std::same_as<std::expected<std::size_t, std::error_code>>;
         { s.write_some(std::span<const char>{}) } -> std::same_as<std::expected<std::size_t, std::error_code>>;
         { s.native_handle() };
@@ -27,7 +36,7 @@ static_assert(
 );
 
 static_assert(
-    requires(net_io::AsyncTcpStreamAdapter& a, std::span<char> buf) {
+    requires(modern::net::AsyncTcpStreamAdapter& a, std::span<char> buf) {
         { a.read_async(buf) } -> std::same_as<net_io::Task<std::expected<std::size_t, std::error_code>>>;
         { a.write_async(std::span<const char>{}) } -> std::same_as<net_io::Task<std::expected<std::size_t, std::error_code>>>;
     },

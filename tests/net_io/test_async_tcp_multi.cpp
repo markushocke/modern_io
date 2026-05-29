@@ -42,7 +42,7 @@ TEST(AsyncTcpMultiTest, AcceptMultipleClients) {
     test_helpers::NetInit netinit;
     net_io::EventLoop::instance().start();
 
-    net_io::AsyncTcpServer server;
+    modern::net::AsyncTcpServer server;
     uint16_t port = net_io::get_free_tcp_port();
     net_io::TcpEndpoint server_ep("127.0.0.1", port);
     auto sres = server.start(server_ep, 8);
@@ -105,7 +105,7 @@ TEST(AsyncTcpMultiTest, AcceptMultipleClients) {
         std::array<char, 8> buf{};
         // use read_exact_async to ensure we receive exactly 1 byte for stream sockets
         // Wrap accepted socket into adapter and use high-level helper
-        net_io::AsyncTcpStreamAdapter stream(server_socks[i]);
+        modern::net::AsyncTcpStreamAdapter stream(server_socks[i]);
         auto rres = sync_run3([&](){ return stream.read_exact_async(std::span<char>(buf.data(), 1)); });
         ASSERT_TRUE((bool)rres);
         ASSERT_TRUE(rres.has_value());

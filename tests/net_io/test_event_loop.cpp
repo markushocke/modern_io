@@ -112,9 +112,9 @@ SimpleTask test_pipe_reader(int fd, bool &out_flag) {
 }
 
 struct IoRegistrationAwaitable {
-    EventLoop& loop;
+    modern::net::EventLoop& loop;
     int fd;
-    IOEvent events;
+    modern::net::IOEvent events;
     bool &resumed_flag;
 
     bool await_ready() noexcept { return false; }
@@ -124,7 +124,7 @@ struct IoRegistrationAwaitable {
     void await_resume() noexcept { resumed_flag = true; }
 };
 
-SimpleTask test_io_registration(EventLoop& loop, int fd, IOEvent events, bool& out_flag) {
+SimpleTask test_io_registration(modern::net::EventLoop& loop, int fd, modern::net::IOEvent events, bool& out_flag) {
     co_await IoRegistrationAwaitable{loop, fd, events, out_flag};
 }
 
@@ -161,11 +161,11 @@ TEST(EventLoopTest, RegisterIoWithPipeResumesReaderOnLocalLoop) {
     int r = fds[0];
     int w = fds[1];
 
-    EventLoop loop;
+    modern::net::EventLoop loop;
     loop.start();
 
     bool resumed = false;
-    auto task = test_io_registration(loop, r, IOEvent::Read, resumed);
+    auto task = test_io_registration(loop, r, modern::net::IOEvent::Read, resumed);
 
     const char b = 'i';
     ssize_t nw = write(w, &b, 1);

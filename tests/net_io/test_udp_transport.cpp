@@ -25,12 +25,12 @@ TEST(UdpTransportTest, SendReceiveConnected) {
     }();
     ASSERT_NE(port, 0u);
 
-    UdpEndpoint server_ep("127.0.0.1", port, true, port);
-    UdpTransport server;
+        modern::net::UdpEndpoint server_ep("127.0.0.1", port, true, port);
+    modern::net::UdpTransport server;
     server.open_bind(server_ep);
 
-    UdpEndpoint client_ep("127.0.0.1", port);
-    UdpTransport client;
+        modern::net::UdpEndpoint client_ep("127.0.0.1", port);
+    modern::net::UdpTransport client;
     client.open_connect(client_ep);
 
     const char* msg = "ping";
@@ -50,3 +50,6 @@ TEST(UdpTransportTest, SendReceiveConnected) {
 
     client.close(); server.close();
 }
+
+static_assert(std::same_as<modern::net::UdpEndpoint, net_io::UdpEndpoint>);
+static_assert(std::same_as<modern::net::UdpTransport, net_io::UdpTransport>);

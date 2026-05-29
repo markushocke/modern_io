@@ -22,8 +22,8 @@ TEST(TcpServerTest, EchoSingleClient) {
     uint16_t port = net_io::get_free_tcp_port();
     ASSERT_NE(port, 0u);
 
-    TcpEndpoint ep("127.0.0.1", port);
-    TcpServer server(ep);
+    modern::net::TcpEndpoint ep("127.0.0.1", port);
+    modern::net::TcpServer server(ep);
     server.start();
 
     std::thread server_thread([&server]() {
@@ -39,7 +39,7 @@ TEST(TcpServerTest, EchoSingleClient) {
         }
     });
 
-    TcpClient client(TcpEndpoint("127.0.0.1", port));
+    modern::net::TcpClient client(modern::net::TcpEndpoint("127.0.0.1", port));
     client.open();
     const char* msg = "hello";
     client.write(msg, 5);
@@ -52,3 +52,5 @@ TEST(TcpServerTest, EchoSingleClient) {
     server.stop();
     if (server_thread.joinable()) server_thread.join();
 }
+
+static_assert(std::same_as<modern::net::TcpServer, net_io::TcpServer>);

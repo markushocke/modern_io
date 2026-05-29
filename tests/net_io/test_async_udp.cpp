@@ -58,7 +58,7 @@ TEST(AsyncUdpTest, DatagramRoundtrip) {
     net_io::EventLoop::instance().start();
 
     // Server socket
-    net_io::AsyncUdpSocket server;
+    modern::net::AsyncUdpSocket server;
     uint16_t port = net_io::get_free_udp_port();
     // Make endpoint with bind_local and local_port so to_sockaddr(true) uses our chosen port
     net_io::UdpEndpoint server_ep("127.0.0.1", port, true, port);
@@ -68,7 +68,7 @@ TEST(AsyncUdpTest, DatagramRoundtrip) {
     ASSERT_TRUE((bool)sres);
 
     // Client socket (unnconnected)
-    net_io::AsyncUdpSocket client;
+    modern::net::AsyncUdpSocket client;
     auto cres = client.ensure_socket();
     ASSERT_TRUE((bool)cres);
 
@@ -117,7 +117,7 @@ TEST(AsyncUdpTest, DatagramRoundtripWithInjectedLoop) {
     net_io::EventLoop loop;
     loop.start();
 
-    net_io::AsyncUdpSocket server(loop);
+    modern::net::AsyncUdpSocket server(loop);
     uint16_t port = net_io::get_free_udp_port();
     net_io::UdpEndpoint server_ep("127.0.0.1", port, true, port);
     auto sa = server_ep.to_sockaddr(true);
@@ -125,7 +125,7 @@ TEST(AsyncUdpTest, DatagramRoundtripWithInjectedLoop) {
     auto sres = server.bind(sa, salen);
     ASSERT_TRUE((bool)sres);
 
-    net_io::AsyncUdpSocket client(loop);
+    modern::net::AsyncUdpSocket client(loop);
 
     sockaddr_storage srvss{};
     auto* sin = reinterpret_cast<sockaddr_in*>(&srvss);
@@ -169,7 +169,7 @@ TEST(AsyncUdpTest, BufferedAdapterUsesSharedConnectionArena) {
     net_io::EventLoop loop;
     loop.start();
 
-    auto server = std::make_shared<net_io::AsyncUdpSocket>(loop);
+    auto server = std::make_shared<modern::net::AsyncUdpSocket>(loop);
     uint16_t port = net_io::get_free_udp_port();
     net_io::UdpEndpoint server_ep("127.0.0.1", port, true, port);
     auto sa = server_ep.to_sockaddr(true);
@@ -178,11 +178,11 @@ TEST(AsyncUdpTest, BufferedAdapterUsesSharedConnectionArena) {
     ASSERT_TRUE((bool)sres);
 
     CountingMemoryResource upstream;
-    auto client = std::make_shared<net_io::AsyncUdpSocket>(
+    auto client = std::make_shared<modern::net::AsyncUdpSocket>(
         loop,
         modern_io::ConnectionArenaSettings{256, &upstream});
     EXPECT_EQ(client->connection_arena().initial_buffer_size(), 256u);
-    net_io::AsyncUdpStreamAdapter client_stream(client);
+    modern::net::AsyncUdpStreamAdapter client_stream(client);
     EXPECT_EQ(client_stream.connection_arena_handle().get(), client->connection_arena_handle().get());
 
     sockaddr_storage srvss{};

@@ -60,3 +60,9 @@ add_net_async_test(test_net_io_event_loop "test_event_loop.cpp")
 
 # IoTask unit test
 add_net_async_test(test_net_io_io_task "test_io_task.cpp")
+
+# Runtime bridge conformance tests (io_bridge / sender_bridge)
+add_net_async_test(test_net_io_runtime_bridges "test_runtime_bridges.cpp")
+
+# Runtime Task fluent API conformance tests
+add_net_async_test(test_net_io_runtime_task_fluent "test_runtime_task_fluent.cpp")

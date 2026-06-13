@@ -22,6 +22,16 @@ Sync and async are never mixed implicitly; W3C trace parsing/formatting and trac
 
 `modern::io::ExpectedTask<T>` remains the I/O-facing name, but it is now a domain alias for `modern::runtime::ResultTask<T, std::error_code>`. `modern::net::Task<T>` and `modern::net::IoTask<T>` are aliases for `modern::runtime::Task<T>`.
 
+`modern::runtime::Task<T>` exposes the exception-channel fluent operators as consuming chains: `then(...)`, `catching(...)`, `finally(...)`. `modern::runtime::ResultTask<T, E>` stays in the expected-channel path and does not expose these exception-channel operators.
+
+For scheduler control on fluent chains, `modern::runtime::Task<T>` also provides `then_on(scheduler, ...)` as explicit scheduler override for the continuation chain.
+
+`modern::runtime::ResultTask<T, E>` exposes expected-channel composition via `transform(...)`, `or_else(...)`, and the convenience aliases `then_value(...)` / `then_error(...)`, preserving explicit `expected` error transport instead of switching to exception-channel chaining. For explicit scheduler override on value-mapping chains, use `then_value_on(scheduler, ...)`.
+
+The buildable example in [examples/io_app.cpp](examples/io_app.cpp) now includes real async I/O roundtrips for UDP and TCP shown in dual style: `co_await` flow and fluent expected-channel composition (`then_value(...)` / `then_error(...)`).
+
+The async behavior is defined by a normative contract (`one task core, two usage styles`) in [docs/dual_async_contract.md](docs/dual_async_contract.md).
+
 ### Concept layers
 
 Everything composes through a small set of concepts:

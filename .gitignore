@@ -1,7 +1,4 @@
-build/
-build_asan/
-build_asan_ci/
-build_debug/
+build*/
 Testing/Temporary/
 /test.bin
 /test2.bin

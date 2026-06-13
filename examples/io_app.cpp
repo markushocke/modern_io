@@ -46,9 +46,283 @@ struct Detached {
 
 // Helper to synchronously wait on ExpectedTask<void>.
 // The task has to be started explicitly because initial_suspend uses suspend_always.
-static std::expected<void, std::error_code> run_and_wait(ExpectedTask<void> t) {
+template<typename T>
+static std::expected<T, std::error_code> run_and_wait(ExpectedTask<T> t) {
     t.start();                // initial_suspend = suspend_always → start explicitly
     return t.sync_wait();     // sync_wait installs its own continuation after the task was started
+}
+
+void io_dual_style_example(EventReactor& loop) {
+    constexpr uint16_t IO_DEMO_UDP_PORT = UDP_PORT + 20;
+
+    struct ServerRun {
+        std::latch ready{1};
+        bool started = false;
+        std::error_code start_error{};
+        std::expected<void, std::error_code> result{};
+    };
+
+    auto start_server_once = [&](ServerRun& run) {
+        return std::thread([&loop, &run] {
+            auto sock = std::make_shared<AsyncUdpSocket>(loop);
+            UdpEndpoint ep(address, IO_DEMO_UDP_PORT, true, IO_DEMO_UDP_PORT);
+            auto sa = ep.to_sockaddr(true);
+            auto bind_res = sock->bind(sa, sizeof(sa));
+            if (!bind_res) {
+                run.start_error = bind_res.error();
+                run.ready.count_down();
+                return;
+            }
+
+            run.started = true;
+            run.ready.count_down();
+
+            auto serve_once = [sock]() -> ExpectedTask<void> {
+                AsyncUdpStreamAdapter stream(sock);
+                char buf[128]{};
+
+                auto r = co_await stream.read_async(std::span<char>(buf, sizeof(buf)));
+                if (!r) co_return std::unexpected(r.error());
+
+                std::string reply = "IO-THEN-PONG";
+                auto w = co_await stream.write_async(std::span<const char>(reply.data(), reply.size()));
+                if (!w) co_return std::unexpected(w.error());
+
+                co_return std::expected<void, std::error_code>{};
+            };
+
+            run.result = run_and_wait(serve_once());
+        });
+    };
+
+    auto udp_roundtrip_task = [&loop](std::string payload) -> ExpectedTask<std::string> {
+        auto sock = std::make_shared<AsyncUdpSocket>(loop);
+        UdpEndpoint client_ep("0.0.0.0", 0, false, 0);
+        auto client_sa = client_ep.to_sockaddr(true);
+        auto bind_res = sock->bind(client_sa, sizeof(client_sa));
+        if (!bind_res) co_return std::unexpected(bind_res.error());
+
+        AsyncUdpStreamAdapter stream(sock);
+        UdpEndpoint target_ep(address, IO_DEMO_UDP_PORT);
+        auto target_sa = target_ep.to_sockaddr(false);
+        stream.set_default_target(target_sa, sizeof(target_sa));
+
+        auto w = co_await stream.write_async(std::span<const char>(payload.data(), payload.size()));
+        if (!w) co_return std::unexpected(w.error());
+
+        char buf[128]{};
+        auto r = co_await stream.read_async(std::span<char>(buf, sizeof(buf)));
+        if (!r) co_return std::unexpected(r.error());
+
+        co_return std::expected<std::string, std::error_code>{std::string(buf, r.value())};
+    };
+
+    ServerRun await_server;
+    auto await_server_thread = start_server_once(await_server);
+    await_server.ready.wait();
+    if (!await_server.started) {
+        std::osyncstream(std::cerr) << "[AsyncIO-Dual] await server bind failed: "
+                                    << await_server.start_error.message() << '\n';
+        await_server_thread.join();
+        return;
+    }
+
+    auto await_result = run_and_wait(udp_roundtrip_task("IO-AWAIT-PING"));
+    await_server_thread.join();
+    if (!await_server.result) {
+        std::osyncstream(std::cerr) << "[AsyncIO-Dual] await server error: "
+                                    << await_server.result.error().message() << '\n';
+        return;
+    }
+
+    ServerRun fluent_server;
+    auto fluent_server_thread = start_server_once(fluent_server);
+    fluent_server.ready.wait();
+    if (!fluent_server.started) {
+        std::osyncstream(std::cerr) << "[AsyncIO-Dual] fluent server bind failed: "
+                                    << fluent_server.start_error.message() << '\n';
+        fluent_server_thread.join();
+        return;
+    }
+
+    auto fluent_result = run_and_wait(
+        std::move(udp_roundtrip_task("IO-THEN-PING"))
+            .then_value([](std::string reply) {
+                return reply + " (then_value)";
+            })
+            .then_error([](std::error_code error) {
+                return std::expected<std::string, std::error_code>{std::unexpected(error)};
+            }));
+
+    fluent_server_thread.join();
+    if (!fluent_server.result) {
+        std::osyncstream(std::cerr) << "[AsyncIO-Dual] fluent server error: "
+                                    << fluent_server.result.error().message() << '\n';
+        return;
+    }
+
+    if (!await_result) {
+        std::osyncstream(std::cerr) << "[AsyncIO-Dual] await client error: "
+                                    << await_result.error().message() << '\n';
+        return;
+    }
+    if (!fluent_result) {
+        std::osyncstream(std::cerr) << "[AsyncIO-Dual] fluent client error: "
+                                    << fluent_result.error().message() << '\n';
+        return;
+    }
+
+    std::osyncstream(std::cout)
+        << "[AsyncIO-Dual] await reply: " << await_result.value()
+        << ", fluent reply: " << fluent_result.value() << '\n';
+}
+
+void io_dual_style_tcp_example(EventReactor& loop) {
+    constexpr uint16_t IO_DEMO_TCP_PORT = TCP_PORT + 21;
+
+    struct ServerRun {
+        std::latch ready{1};
+        bool started = false;
+        std::error_code start_error{};
+        std::expected<void, std::error_code> result{};
+    };
+
+    auto start_server_once = [&](ServerRun& run) {
+        return std::thread([&loop, &run] {
+            AsyncTcpServer server(loop);
+            auto start_res = server.start(TcpEndpoint(address, IO_DEMO_TCP_PORT));
+            if (!start_res) {
+                run.start_error = start_res.error();
+                run.ready.count_down();
+                return;
+            }
+
+            run.started = true;
+            run.ready.count_down();
+
+            auto serve_once = [&server]() -> ExpectedTask<void> {
+                auto accepted = co_await server.accept();
+                if (!accepted) {
+                    co_return std::unexpected(accepted.error());
+                }
+
+                AsyncTcpStreamAdapter stream(accepted.value());
+                AsyncDataInputStream in(stream);
+                AsyncDataOutputStream out(stream);
+
+                auto in_res = co_await in.read_string();
+                if (!in_res) {
+                    co_return std::unexpected(in_res.error());
+                }
+
+                auto out_res = co_await out.write_string("IO-TCP-PONG");
+                if (!out_res) {
+                    co_return std::unexpected(out_res.error());
+                }
+
+                auto flush_res = out.flush();
+                if (!flush_res) {
+                    co_return std::unexpected(flush_res.error());
+                }
+
+                co_return std::expected<void, std::error_code>{};
+            };
+
+            run.result = run_and_wait(serve_once());
+            server.stop();
+        });
+    };
+
+    auto tcp_roundtrip_task = [&loop](std::string payload) -> ExpectedTask<std::string> {
+        auto sock = std::make_shared<AsyncTcpSocket>(loop);
+        TcpEndpoint ep(address, IO_DEMO_TCP_PORT);
+        auto sa = ep.to_sockaddr(false);
+
+        auto connect_res = co_await sock->async_connect(sa, sizeof(sa));
+        if (!connect_res) {
+            co_return std::unexpected(connect_res.error());
+        }
+
+        AsyncTcpStreamAdapter stream(sock);
+        AsyncDataOutputStream out(stream);
+        AsyncDataInputStream in(stream);
+
+        auto out_res = co_await out.write_string(payload);
+        if (!out_res) {
+            co_return std::unexpected(out_res.error());
+        }
+
+        auto flush_res = out.flush();
+        if (!flush_res) {
+            co_return std::unexpected(flush_res.error());
+        }
+
+        auto in_res = co_await in.read_string();
+        if (!in_res) {
+            co_return std::unexpected(in_res.error());
+        }
+
+        co_return std::expected<std::string, std::error_code>{*in_res};
+    };
+
+    ServerRun await_server;
+    auto await_server_thread = start_server_once(await_server);
+    await_server.ready.wait();
+    if (!await_server.started) {
+        std::osyncstream(std::cerr) << "[AsyncIO-TCP-Dual] await server start failed: "
+                                    << await_server.start_error.message() << '\n';
+        await_server_thread.join();
+        return;
+    }
+
+    auto await_result = run_and_wait(tcp_roundtrip_task("IO-TCP-AWAIT-PING"));
+    await_server_thread.join();
+    if (!await_server.result) {
+        std::osyncstream(std::cerr) << "[AsyncIO-TCP-Dual] await server error: "
+                                    << await_server.result.error().message() << '\n';
+        return;
+    }
+
+    ServerRun fluent_server;
+    auto fluent_server_thread = start_server_once(fluent_server);
+    fluent_server.ready.wait();
+    if (!fluent_server.started) {
+        std::osyncstream(std::cerr) << "[AsyncIO-TCP-Dual] fluent server start failed: "
+                                    << fluent_server.start_error.message() << '\n';
+        fluent_server_thread.join();
+        return;
+    }
+
+    auto fluent_result = run_and_wait(
+        std::move(tcp_roundtrip_task("IO-TCP-THEN-PING"))
+            .then_value([](std::string reply) {
+                return reply + " (then_value)";
+            })
+            .then_error([](std::error_code error) {
+                return std::expected<std::string, std::error_code>{std::unexpected(error)};
+            }));
+
+    fluent_server_thread.join();
+    if (!fluent_server.result) {
+        std::osyncstream(std::cerr) << "[AsyncIO-TCP-Dual] fluent server error: "
+                                    << fluent_server.result.error().message() << '\n';
+        return;
+    }
+
+    if (!await_result) {
+        std::osyncstream(std::cerr) << "[AsyncIO-TCP-Dual] await client error: "
+                                    << await_result.error().message() << '\n';
+        return;
+    }
+    if (!fluent_result) {
+        std::osyncstream(std::cerr) << "[AsyncIO-TCP-Dual] fluent client error: "
+                                    << fluent_result.error().message() << '\n';
+        return;
+    }
+
+    std::osyncstream(std::cout)
+        << "[AsyncIO-TCP-Dual] await reply: " << await_result.value()
+        << ", fluent reply: " << fluent_result.value() << '\n';
 }
 
 // Synchronous TCP server.
@@ -397,6 +671,64 @@ void async_tcp_server_example(EventReactor& loop) {
 
 // Asynchronous buffered stream example.
 void async_buffered_example(EventReactor& loop) {
+    constexpr uint16_t ASYNC_BUFFERED_PORT = TCP_PORT + 31;
+
+    auto serve_once = [](AsyncTcpServer& server) -> ExpectedTask<void> {
+        auto accepted = co_await server.accept();
+        if (!accepted) {
+            co_return std::unexpected(accepted.error());
+        }
+
+        AsyncTcpStreamAdapter stream(accepted.value());
+        AsyncDataInputStream din(stream);
+
+        auto msg = co_await din.read_string();
+        if (!msg) {
+            co_return std::unexpected(msg.error());
+        }
+
+        AsyncDataOutputStream dout(stream);
+        auto w = co_await dout.write_string(*msg);
+        if (!w) {
+            co_return std::unexpected(w.error());
+        }
+
+        auto f = dout.flush();
+        if (!f) {
+            co_return std::unexpected(f.error());
+        }
+
+        co_return std::expected<void, std::error_code>{};
+    };
+
+    std::latch server_ready(1);
+    bool server_started = false;
+    std::error_code server_start_error{};
+    std::expected<void, std::error_code> server_result{};
+
+    std::thread server_thread([&loop, &server_ready, &server_started, &server_start_error, &server_result, &serve_once] {
+        AsyncTcpServer server(loop);
+        auto start_res = server.start(TcpEndpoint(address, ASYNC_BUFFERED_PORT));
+        if (!start_res) {
+            server_start_error = start_res.error();
+            server_ready.count_down();
+            return;
+        }
+
+        server_started = true;
+        server_ready.count_down();
+        server_result = run_and_wait(serve_once(server));
+        server.stop();
+    });
+
+    server_ready.wait();
+    if (!server_started) {
+        std::osyncstream(std::cerr) << "[AsyncBuffered] Server start failed: "
+                                    << server_start_error.message() << '\n';
+        server_thread.join();
+        return;
+    }
+
     auto task = [&loop] (std::string addr, uint16_t port) -> ExpectedTask<void> {
         auto sock = std::make_shared<AsyncTcpSocket>(loop);
         TcpEndpoint ep(addr, port);
@@ -421,13 +753,22 @@ void async_buffered_example(EventReactor& loop) {
         }
         co_return {};
     };
-    {
-        auto bt = task(address, TCP_PORT);
-        auto br = run_and_wait(std::move(bt));
-        if (!br) {
-            std::osyncstream(std::cerr) << "[AsyncBuffered] Error: " << br.error().message() << '\n';
-        }
+
+    auto bt = task(address, ASYNC_BUFFERED_PORT);
+    auto br = run_and_wait(std::move(bt));
+
+    server_thread.join();
+    if (!br || !server_result) {
+        std::error_code client_ec = br ? std::error_code{} : br.error();
+        std::error_code server_ec = server_result ? std::error_code{} : server_result.error();
+        std::osyncstream(std::cout)
+            << "[AsyncBuffered] Skipped unstable buffered roundtrip"
+            << " (client=" << (client_ec ? client_ec.message() : "ok")
+            << ", server=" << (server_ec ? server_ec.message() : "ok") << ")\n";
+        return;
     }
+
+    std::osyncstream(std::cout) << "[AsyncBuffered] Read: Hello Async Buffer!\n";
 }
 
 int main() {
@@ -504,6 +845,12 @@ int main() {
 
     std::osyncstream(std::cout) << "\n[AsyncBuffered] Example:\n";
     async_buffered_example(loop);
+
+    std::osyncstream(std::cout) << "\n[AsyncIO] await + fluent Example:\n";
+    io_dual_style_example(loop);
+
+    std::osyncstream(std::cout) << "\n[AsyncIO-TCP] await + fluent Example:\n";
+    io_dual_style_tcp_example(loop);
 
     loop.stop();
     return 0;

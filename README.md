@@ -1,5 +1,5 @@
-# Modern IO
 
+# ![Modern IO Logo](graphics/modern_io.png)
 A C++23 framework for type-safe I/O — files, networking, and async coroutine surfaces.  
 Built on modules, concepts, `std::expected`, `modern_trace` for the shared trace contract, and `modern_runtime` for the coroutine task core.
 
@@ -7,7 +7,40 @@ Built on modules, concepts, `std::expected`, `modern_trace` for the shared trace
 
 ## Architecture
 
-The framework is split into five link targets.  Consumers pick only what they need:
+The framework is split into modules that implement the shared concept hierarchy:
+
+```
+                      Concepts
+                          │
+        ┌─────────────────┼─────────────────┐
+        │                 │                 │
+        ▼                 ▼                 ▼
+   File I/O          TCP Networking    UDP Networking
+        │                 │                 │
+        └─────────────────┼─────────────────┘
+                          │
+                    make_stream()
+                          │
+        ┌─────────────────┼─────────────────┐
+        │                                   │
+        ▼                                   ▼
+   InputStream                        OutputStream
+        │                                   │
+        └─────────────────┬─────────────────┘
+                          │
+                     Data Streams
+
+                  Sync / Async Parity
+
+      Readable              ↔ AsyncReadable
+      Writable              ↔ AsyncWritable
+      Transportable         ↔ AsyncTransportable
+      Connectable           ↔ AsyncConnectable
+      InputStream           ↔ AsyncInputStream
+      OutputStream          ↔ AsyncOutputStream
+```
+
+This design emphasizes reusability and composability across different I/O transports.
 
 ```
 modern_io              sync file / data / buffered / iostream streams
@@ -17,34 +50,69 @@ net_io_async           EventLoop, awaiters, async sockets & server
 net_io_adapters        bridges net_io transports into modern_io streams
 ```
 
-Dependency rule: `modern_io` → `modern_trace`, `modern_io_async` → `modern_io` + `modern_runtime`, `net_io_async` → `net_io` + `modern_io_async` + `modern_runtime`.  
-Sync and async are never mixed implicitly; W3C trace parsing/formatting and trace drain primitives live in `modern_trace`, while coroutine ownership, frame PMR, trace propagation, and generic result tasks live in `modern_runtime`.
+## Core Concepts
 
-`modern::io::ExpectedTask<T>` remains the I/O-facing name, but it is now a domain alias for `modern::runtime::ResultTask<T, std::error_code>`. `modern::net::Task<T>` and `modern::net::IoTask<T>` are aliases for `modern::runtime::Task<T>`.
+modern_io is built around a small set of composable concepts rather than
+concrete implementations.
 
-`modern::runtime::Task<T>` exposes the exception-channel fluent operators as consuming chains: `then(...)`, `catching(...)`, `finally(...)`. `modern::runtime::ResultTask<T, E>` stays in the expected-channel path and does not expose these exception-channel operators.
+Files, TCP sockets, UDP sockets, adapters, and future transports all
+participate in the same conceptual model. Algorithms, buffering layers,
+serialization, and stream abstractions work across transport types without
+modification.
 
-For scheduler control on fluent chains, `modern::runtime::Task<T>` also provides `then_on(scheduler, ...)` as explicit scheduler override for the continuation chain.
+### Transport Concepts
 
-`modern::runtime::ResultTask<T, E>` exposes expected-channel composition via `transform(...)`, `or_else(...)`, and the convenience aliases `then_value(...)` / `then_error(...)`, preserving explicit `expected` error transport instead of switching to exception-channel chaining. For explicit scheduler override on value-mapping chains, use `then_value_on(scheduler, ...)`.
+| Capability | Sync | Async |
+|------|------|--------|
+| Read | `InputStream` | `AsyncInputStream` |
+| Write | `OutputStream` | `AsyncOutputStream` |
+| Read | `Readable` | `AsyncReadable` |
+| Writ | `Writable` | `AsyncWritable` |
+| Duplex Transport | `Transportable` | `AsyncTransportable` |
+| Connect | `Connectable` | `AsyncConnectable` |
+| Connect Endpoint | `ConnectableTo<T>` | `AsyncConnectableTo<T>` |
+| Close | `Closable` | `AsyncClosable` |
+| Flush | `Flushable` | `AsyncFlushable` |
+| EOF Detection | `EOFAware` | `AsyncEOFAware` |
+| Server Accept | `Acceptable` | `AsyncAcceptable` |
 
-The buildable example in [examples/io_app.cpp](examples/io_app.cpp) now includes real async I/O roundtrips for UDP and TCP shown in dual style: `co_await` flow and fluent expected-channel composition (`then_value(...)` / `then_error(...)`).
+### Stream Concepts
 
-The async behavior is defined by a normative contract (`one task core, two usage styles`) in [docs/dual_async_contract.md](docs/dual_async_contract.md).
+| Sync | Async |
+|------|--------|
+| `InputStream` | `AsyncInputStream` |
+| `OutputStream` | `AsyncOutputStream` |
 
-### Concept layers
 
-Everything composes through a small set of concepts:
+### Concept Documentation
 
-| Layer | Sync | Async |
-|---|---|---|
-| **Streams** | `InputStream` / `OutputStream` | `AsyncInputStream` / `AsyncOutputStream` |
-| **Transports** | `Transportable` (open/close/read/write) | `AsyncTcpSocket`, `AsyncUdpSocket` |
-| **Adapters** | `TransportSource`/`TransportSink`, `make_stream()` | `AsyncTcpStreamAdapter`, `AsyncUdpStreamAdapter` |
-| **Servers** | `Acceptable` + `ThreadExecutor` | `AsyncTcpServer::accept()` coroutine |
+- [Streams](docs/concepts/streams.md)
+- [Transports](docs/concepts/transports.md)
+- [Adapters](docs/concepts/adapters.md)
+- [Servers](docs/concepts/servers.md)
+- [Async Runtime](docs/concepts/async_runtime.md)
 
-A new transport only needs to satisfy the matching concept.  
-Adapters, data streams, and buffering compose on top automatically.
+### Design Principles
+
+- **Concept-first architecture**: All modules implement a shared set of concepts for composability.
+- **Sync and async parity**: Both synchronous and asynchronous APIs follow the same conceptual model with `std::expected` for async error transport.
+- **Type-safe APIs**: Concepts enforce compile-time correctness across all I/O operations.
+- **C++23 modules and concepts**: Leverages modern C++ features for better organization and type safety.
+- **Zero-overhead abstractions**: No runtime overhead from the conceptual model.
+- **Transport-independent stream adapters**: Adapters like `make_stream()` work across files, TCP, UDP, and future transports.
+
+### Transport Adapters
+
+A core feature of modern_io is the ability to create streams from various transports using `make_stream()`:
+
+```cpp
+auto stream = make_stream(File(...));
+auto stream = make_stream(TcpEndpoint("127.0.0.1", 9000));
+auto stream = make_stream(UdpEndpoint("127.0.0.1", 9000));
+```
+
+All these streams expose the same `DataStream` API, enabling consistent I/O operations across different transports.
+
 
 ---
 

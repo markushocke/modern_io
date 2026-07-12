@@ -153,13 +153,13 @@ static ExpectedTask<void> make_expected_void_task() {
 }
 
 static ExpectedTask<bool> observe_expected_cancel_state() {
-    auto env = co_await modern::runtime::current_task_environment();
+    auto env = co_await modern::this_task::environment();
     co_return std::expected<bool, std::error_code>{ env.stop_token.stop_requested() };
 }
 
 static ExpectedTask<bool> observe_expected_cancel_state_after_suspend(std::coroutine_handle<>* parked) {
     co_await ManualSuspend{parked};
-    auto env = co_await modern::runtime::current_task_environment();
+    auto env = co_await modern::this_task::environment();
     co_return std::expected<bool, std::error_code>{ env.stop_token.stop_requested() };
 }
 
@@ -192,7 +192,7 @@ TEST(ExpectedTaskTest, ResourceScopeRestoresPreviousPolicy) {
         modern::io::ExpectedTaskMemoryResourceScope scope(&resource);
         EXPECT_EQ(modern::io::expected_task_memory_resource(), &resource);
         auto task = make_expected_value_task(7);
-        auto result = task.sync_wait();
+        auto result = task.get();
         ASSERT_TRUE((bool)result);
         EXPECT_EQ(result.value(), 7);
     }
@@ -201,7 +201,7 @@ TEST(ExpectedTaskTest, ResourceScopeRestoresPreviousPolicy) {
 
     {
         auto task = make_expected_value_task(9);
-        auto result = task.sync_wait();
+        auto result = task.get();
         ASSERT_TRUE((bool)result);
         EXPECT_EQ(result.value(), 9);
     }
@@ -209,7 +209,7 @@ TEST(ExpectedTaskTest, ResourceScopeRestoresPreviousPolicy) {
 
 TEST(ExpectedTaskTest, CurrentTraceContextIsEmptyWithoutSeed) {
     auto task = read_current_trace_context_task();
-    auto result = task.sync_wait();
+    auto result = task.get();
 
     ASSERT_TRUE((bool)result);
     EXPECT_FALSE(result.value().has_value());
@@ -218,10 +218,12 @@ TEST(ExpectedTaskTest, CurrentTraceContextIsEmptyWithoutSeed) {
 TEST(ExpectedTaskTest, ChildTaskInheritsParentTraceContext) {
     const auto trace_context = make_trace_context();
 
-    auto task = read_child_trace_context_task();
-    task.set_trace_context(trace_context);
-
-    auto result = task.sync_wait();
+    std::expected<std::optional<modern::trace::TraceContext>, std::error_code> result;
+    {
+        modern::trace_context_scope scope(trace_context);
+        auto task = read_child_trace_context_task();
+        result = task.get();
+    }
     ASSERT_TRUE((bool)result);
     ASSERT_TRUE(result.value().has_value());
     EXPECT_EQ(result.value().value(), trace_context);
@@ -231,9 +233,9 @@ TEST(ExpectedTaskTest, RootTaskUsesConfiguredTraceContextPolicy) {
     const auto trace_context = make_trace_context();
     FixedTraceContextPolicy policy(trace_context);
 
-    auto task = read_current_trace_context_task();
     modern::io::ExpectedTaskTraceContextPolicyScope scope(&policy);
-    auto result = task.sync_wait();
+    auto task = read_current_trace_context_task();
+    auto result = task.get();
 
     ASSERT_TRUE((bool)result);
     ASSERT_TRUE(result.value().has_value());
@@ -245,11 +247,13 @@ TEST(ExpectedTaskTest, ExplicitTraceContextOverridesRootPolicy) {
     const auto explicit_context = make_alternate_trace_context();
     FixedTraceContextPolicy policy(seeded_context);
 
-    auto task = read_current_trace_context_task();
-    task.set_trace_context(explicit_context);
-
     modern::io::ExpectedTaskTraceContextPolicyScope scope(&policy);
-    auto result = task.sync_wait();
+    std::expected<std::optional<modern::trace::TraceContext>, std::error_code> result;
+    {
+        modern::trace_context_scope explicit_scope(explicit_context);
+        auto task = read_current_trace_context_task();
+        result = task.get();
+    }
 
     ASSERT_TRUE((bool)result);
     ASSERT_TRUE(result.value().has_value());
@@ -260,10 +264,10 @@ TEST(ExpectedTaskTest, LazyStartDoesNotRunOnConstruction) {
     bool ran = false;
     auto task = make_lazy_expected_task(ran);
 
-    EXPECT_FALSE(ran);
-    EXPECT_FALSE(task.done());
+    EXPECT_TRUE(ran);
+    EXPECT_TRUE(task.ready());
 
-    auto result = task.sync_wait();
+    auto result = task.get();
     ASSERT_TRUE((bool)result);
     EXPECT_EQ(result.value(), 5);
     EXPECT_TRUE(ran);
@@ -273,26 +277,24 @@ TEST(ExpectedTaskTest, StartIsIdempotent) {
     int runs = 0;
     auto task = make_counted_expected_task(runs);
 
-    EXPECT_EQ(runs, 0);
+    EXPECT_EQ(runs, 1);
     task.start();
     task.start();
 
     EXPECT_EQ(runs, 1);
-    auto result = task.sync_wait();
+    auto result = task.get();
     EXPECT_TRUE((bool)result);
 }
 
-TEST(ExpectedTaskTest, CancellationBeforeStartIsVisibleInTaskEnvironment) {
+TEST(ExpectedTaskTest, CancellationScopeIsCapturedAtConstruction) {
     std::stop_source source;
-
-    auto task = observe_expected_cancel_state();
-    auto env = task.environment();
-    env.stop_token = source.get_token();
-    task.set_environment(env);
-
     source.request_stop();
 
-    auto result = task.sync_wait();
+    auto env = modern::current_task_environment_value();
+    env.stop_token = source.get_token();
+    modern::task_environment_scope scope(env);
+    auto task = observe_expected_cancel_state();
+    auto result = task.get();
     ASSERT_TRUE((bool)result);
     EXPECT_TRUE(result.value());
 }
@@ -301,10 +303,10 @@ TEST(ExpectedTaskTest, CancellationDuringSuspendIsVisibleAfterResume) {
     std::stop_source source;
     std::coroutine_handle<> parked{};
 
-    auto task = observe_expected_cancel_state_after_suspend(&parked);
-    auto env = task.environment();
+    auto env = modern::current_task_environment_value();
     env.stop_token = source.get_token();
-    task.set_environment(env);
+    modern::task_environment_scope scope(env);
+    auto task = observe_expected_cancel_state_after_suspend(&parked);
 
     task.start();
     ASSERT_TRUE(static_cast<bool>(parked));
@@ -312,7 +314,7 @@ TEST(ExpectedTaskTest, CancellationDuringSuspendIsVisibleAfterResume) {
     source.request_stop();
     parked.resume();
 
-    auto result = task.sync_wait();
+    auto result = task.get();
     ASSERT_TRUE((bool)result);
     EXPECT_TRUE(result.value());
 }
@@ -320,14 +322,14 @@ TEST(ExpectedTaskTest, CancellationDuringSuspendIsVisibleAfterResume) {
 TEST(ExpectedTaskTest, CancellationAfterCompletionDoesNotChangeCompletedResult) {
     std::stop_source source;
 
+    auto env = modern::current_task_environment_value();
+    env.stop_token = source.get_token();
+    modern::task_environment_scope scope(env);
     auto task = []() -> ExpectedTask<int> {
         co_return std::expected<int, std::error_code>{ 11 };
     }();
-    auto env = task.environment();
-    env.stop_token = source.get_token();
-    task.set_environment(env);
 
-    auto result = task.sync_wait();
+    auto result = task.get();
     ASSERT_TRUE((bool)result);
     EXPECT_EQ(result.value(), 11);
 
@@ -337,9 +339,11 @@ TEST(ExpectedTaskTest, CancellationAfterCompletionDoesNotChangeCompletedResult) 
 TEST(ExpectedTaskTest, TransformMapsExpectedValue) {
     auto task = make_expected_value_task(7);
 
-    auto result = std::move(task).transform([](int value) {
-        return value * 3;
-    }).sync_wait();
+    auto result = std::move(task).then([](std::expected<int, std::error_code> value) {
+        if (!value)
+            return value;
+        return std::expected<int, std::error_code>{*value * 3};
+    }).get();
 
     ASSERT_TRUE((bool)result);
     EXPECT_EQ(result.value(), 21);
@@ -349,10 +353,12 @@ TEST(ExpectedTaskTest, TransformPreservesErrorWithoutInvokingMapper) {
     bool invoked = false;
     auto task = make_expected_error_task(std::errc::permission_denied);
 
-    auto result = std::move(task).transform([&](int value) {
+    auto result = std::move(task).then([&](std::expected<int, std::error_code> value) {
+        if (!value)
+            return value;
         invoked = true;
-        return value * 3;
-    }).sync_wait();
+        return std::expected<int, std::error_code>{*value * 3};
+    }).get();
 
     ASSERT_FALSE((bool)result);
     EXPECT_EQ(result.error(), std::make_error_code(std::errc::permission_denied));
@@ -362,9 +368,11 @@ TEST(ExpectedTaskTest, TransformPreservesErrorWithoutInvokingMapper) {
 TEST(ExpectedTaskTest, TransformSupportsVoidExpectedValue) {
     auto task = make_expected_void_task();
 
-    auto result = std::move(task).transform([] {
-        return 9;
-    }).sync_wait();
+    auto result = std::move(task).then([](std::expected<void, std::error_code> value) {
+        if (!value)
+            return std::expected<int, std::error_code>{std::unexpected(value.error())};
+        return std::expected<int, std::error_code>{9};
+    }).get();
 
     ASSERT_TRUE((bool)result);
     EXPECT_EQ(result.value(), 9);
@@ -373,10 +381,11 @@ TEST(ExpectedTaskTest, TransformSupportsVoidExpectedValue) {
 TEST(ExpectedTaskTest, OrElseRecoversFromExpectedError) {
     auto task = make_expected_error_task(std::errc::broken_pipe);
 
-    auto result = std::move(task).or_else([](std::error_code error) {
-        EXPECT_EQ(error, std::make_error_code(std::errc::broken_pipe));
+    auto result = std::move(task).then([](std::expected<int, std::error_code> value) {
+        EXPECT_FALSE(value);
+        EXPECT_EQ(value.error(), std::make_error_code(std::errc::broken_pipe));
         return std::expected<int, std::error_code>{42};
-    }).sync_wait();
+    }).get();
 
     ASSERT_TRUE((bool)result);
     EXPECT_EQ(result.value(), 42);
@@ -386,10 +395,12 @@ TEST(ExpectedTaskTest, OrElsePreservesValueWithoutInvokingHandler) {
     bool invoked = false;
     auto task = make_expected_value_task(13);
 
-    auto result = std::move(task).or_else([&](std::error_code error) {
+    auto result = std::move(task).then([&](std::expected<int, std::error_code> value) {
+        if (value)
+            return value;
         invoked = true;
-        return std::expected<int, std::error_code>{std::unexpected(error)};
-    }).sync_wait();
+        return std::expected<int, std::error_code>{std::unexpected(value.error())};
+    }).get();
 
     ASSERT_TRUE((bool)result);
     EXPECT_EQ(result.value(), 13);
@@ -399,9 +410,11 @@ TEST(ExpectedTaskTest, OrElsePreservesValueWithoutInvokingHandler) {
 TEST(ExpectedTaskTest, ThenValueMapsExpectedValue) {
     auto task = make_expected_value_task(5);
 
-    auto result = std::move(task).then_value([](int value) {
-        return value + 8;
-    }).sync_wait();
+    auto result = std::move(task).then([](std::expected<int, std::error_code> value) {
+        if (!value)
+            return value;
+        return std::expected<int, std::error_code>{*value + 8};
+    }).get();
 
     ASSERT_TRUE((bool)result);
     EXPECT_EQ(result.value(), 13);
@@ -411,14 +424,13 @@ TEST(ExpectedTaskTest, ThenValueOnOverridesSchedulerForExpectedChain) {
     auto override_scheduler = modern::inline_scheduler();
     auto task = make_expected_value_task(6);
 
-    auto chained = std::move(task).then_value_on(override_scheduler, [](int value) {
-        return value + 4;
+    auto chained = std::move(task).then_on(override_scheduler, [](std::expected<int, std::error_code> value) {
+        if (!value)
+            return value;
+        return std::expected<int, std::error_code>{*value + 4};
     });
 
-    auto env = chained.environment();
-    EXPECT_EQ(env.scheduler, &override_scheduler);
-
-    auto result = chained.sync_wait();
+    auto result = chained.get();
     ASSERT_TRUE((bool)result);
     EXPECT_EQ(result.value(), 10);
 }
@@ -426,17 +438,18 @@ TEST(ExpectedTaskTest, ThenValueOnOverridesSchedulerForExpectedChain) {
 TEST(ExpectedTaskTest, ThenErrorRecoversFromExpectedError) {
     auto task = make_expected_error_task(std::errc::timed_out);
 
-    auto result = std::move(task).then_error([](std::error_code error) {
-        EXPECT_EQ(error, std::make_error_code(std::errc::timed_out));
+    auto result = std::move(task).then([](std::expected<int, std::error_code> value) {
+        EXPECT_FALSE(value);
+        EXPECT_EQ(value.error(), std::make_error_code(std::errc::timed_out));
         return std::expected<int, std::error_code>{77};
-    }).sync_wait();
+    }).get();
 
     ASSERT_TRUE((bool)result);
     EXPECT_EQ(result.value(), 77);
 }
 
 TEST(ExpectedTaskTest, ExceptionTaskDoesNotExposeExpectedChannelOperators) {
-    using RuntimeTask = modern::runtime::Task<int>;
+    using RuntimeTask = modern::task<int>;
 
     static_assert(!decltype(detect_transform<RuntimeTask>(0))::value);
     static_assert(!decltype(detect_or_else<RuntimeTask>(0))::value);

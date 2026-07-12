@@ -69,7 +69,7 @@ TEST(RuntimeBridgeTest, SenderBridgeStoppedMapsToCancellationException) {
         task.get();
         FAIL() << "expected cancellation exception";
     } catch (const std::runtime_error& e) {
-        EXPECT_STREQ(e.what(), "task cancelled");
+        EXPECT_STREQ(e.what(), "operation cancelled");
     } catch (...) {
         FAIL() << "unexpected exception type";
     }
@@ -109,7 +109,7 @@ TEST(RuntimeBridgeTest, IoBridgePreCancelledTokenSkipsStarterAndCancelsTask) {
         (void)task.get();
         FAIL() << "expected cancellation exception";
     } catch (const std::runtime_error& e) {
-        EXPECT_STREQ(e.what(), "task cancelled");
+        EXPECT_STREQ(e.what(), "operation cancelled");
     } catch (...) {
         FAIL() << "unexpected exception type";
     }

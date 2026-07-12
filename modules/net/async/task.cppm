@@ -7,7 +7,7 @@ import modern.runtime;
 export namespace modern::net
 {
 template<typename T>
-using Task = modern::runtime::Task<T>;
+using Task = modern::task<T>;
 
 template<typename T>
 using IoTask = Task<T>;

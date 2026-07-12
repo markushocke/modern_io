@@ -7,6 +7,7 @@ module;
 #include <expected>
 #include <system_error>
 #include <coroutine>
+#include <utility>
 #endif
 
 export module modern_io.concepts;
@@ -18,6 +19,7 @@ import <span>;
 import <expected>;
 import <system_error>;
 import <coroutine>;
+import <utility>;
 #endif
 
 namespace modern::io
@@ -61,8 +63,15 @@ concept AwaiterOfExpected = requires(A a, std::coroutine_handle<> h) {
     { a.await_resume() } -> std::same_as<std::expected<V, std::error_code>>;
 };
 
+template<typename A, typename V>
+concept AwaitableOfExpected =
+    AwaiterOfExpected<A, V> ||
+    requires(A a) {
+        { std::move(a).operator co_await() } -> AwaiterOfExpected<V>;
+    };
+
 template<typename A>
-concept AwaiterOfExpectedVoid = AwaiterOf<A, std::expected<void, std::error_code>>;
+concept AwaitableOfExpectedVoid = AwaitableOfExpected<A, void>;
 
 // Async stream concepts.
 export
@@ -70,9 +79,9 @@ template<typename S>
 concept AsyncOutputStream = requires(S s, const char* ptr, std::size_t n,
                                      std::span<const std::byte> bspan,
                                      std::span<const char> cspan) {
-    { s.write_async(ptr, n) }  -> AwaiterOfExpected<std::size_t>;
-    { s.write_async(bspan) }   -> AwaiterOfExpected<std::size_t>;
-    { s.write_async(cspan) }   -> AwaiterOfExpected<std::size_t>;
+    { s.write_async(ptr, n) }  -> AwaitableOfExpected<std::size_t>;
+    { s.write_async(bspan) }   -> AwaitableOfExpected<std::size_t>;
+    { s.write_async(cspan) }   -> AwaitableOfExpected<std::size_t>;
     { s.flush() }              -> std::same_as<std::expected<void, std::error_code>>;
 };
 
@@ -81,9 +90,9 @@ template<typename S>
 concept AsyncInputStream = requires(S s, char* ptr, std::size_t n,
                                     std::span<std::byte> bspan,
                                     std::span<char> cspan) {
-    { s.read_async(ptr, n) } -> AwaiterOfExpected<std::size_t>;
-    { s.read_async(bspan) }  -> AwaiterOfExpected<std::size_t>;
-    { s.read_async(cspan) }  -> AwaiterOfExpected<std::size_t>;
+    { s.read_async(ptr, n) } -> AwaitableOfExpected<std::size_t>;
+    { s.read_async(bspan) }  -> AwaitableOfExpected<std::size_t>;
+    { s.read_async(cspan) }  -> AwaitableOfExpected<std::size_t>;
     { s.eof() }              -> std::same_as<std::expected<bool, std::error_code>>;
 };
 
@@ -91,13 +100,13 @@ concept AsyncInputStream = requires(S s, char* ptr, std::size_t n,
 export
 template<typename S>
 concept AsyncFlushable = requires(S s) {
-    { s.flush_async() } -> AwaiterOfExpectedVoid;
+    { s.flush_async() } -> AwaitableOfExpectedVoid;
 };
 
 export
 template<typename S>
 concept AsyncEOFAware = requires(S s) {
-    { s.eof_async() } -> AwaiterOfExpected<bool>;
+    { s.eof_async() } -> AwaitableOfExpected<bool>;
 };
 
 } // namespace modern::io

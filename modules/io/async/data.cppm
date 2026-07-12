@@ -11,6 +11,8 @@ module;
 #include <expected>
 #include <coroutine>
 #include <system_error>
+#include <utility>
+#include <array>
 #endif
 
 export module modern_io.async_data;
@@ -25,6 +27,8 @@ import <span>;
 import <expected>;
 import <coroutine>;
 import <system_error>;
+import <utility>;
+import <array>;
 #endif
 
 namespace modern::io
@@ -45,9 +49,14 @@ public:
         return sink_.write_async(std::span<const std::byte>(data.data(), data.size()));
     }
     std::expected<void,std::error_code> flush() { return sink_.flush(); }
+    auto flush_async()
+        requires requires(S& sink) { sink.flush_async(); }
+    {
+        return sink_.flush_async();
+    }
 
-    auto write_int32(int32_t v) {
-        std::byte buf[4];
+    ExpectedTask<std::size_t> write_int32(int32_t v) {
+        std::array<std::byte, 4> buf{};
         if (order_ == std::endian::big) {
             buf[0]=std::byte((v>>24)&0xFF); buf[1]=std::byte((v>>16)&0xFF);
             buf[2]=std::byte((v>> 8)&0xFF); buf[3]=std::byte((v    )&0xFF);
@@ -55,16 +64,16 @@ public:
             buf[3]=std::byte((v>>24)&0xFF); buf[2]=std::byte((v>>16)&0xFF);
             buf[1]=std::byte((v>> 8)&0xFF); buf[0]=std::byte((v    )&0xFF);
         }
-        return sink_.write_async(buf);
+        co_return co_await write_all(std::span<const std::byte>(buf));
     }
     auto write_uint32(uint32_t v) { return write_int32(static_cast<int32_t>(v)); }
-    auto write_int64(int64_t v) {
-        std::byte buf[8];
+    ExpectedTask<std::size_t> write_int64(int64_t v) {
+        std::array<std::byte, 8> buf{};
         if (order_ == std::endian::big)
             for(int i=0;i<8;++i) buf[i]=std::byte((v>>(56-8*i))&0xFF);
         else
             for(int i=0;i<8;++i) buf[7-i]=std::byte((v>>(56-8*i))&0xFF);
-        return sink_.write_async(buf,8);
+        co_return co_await write_all(std::span<const std::byte>(buf));
     }
     auto write_uint64(uint64_t v){ return write_int64(static_cast<int64_t>(v)); }
     auto write_float(float f){
@@ -77,20 +86,36 @@ public:
     }
 
     // Multi-step operation implemented as a coroutine.
-    ExpectedTask<std::size_t> write_string(const std::string& s) {
+    ExpectedTask<std::size_t> write_string(std::string s) {
         std::size_t total = 0;
         auto lenAw = write_int32(static_cast<int32_t>(s.size()));
-        auto lr = co_await lenAw;
+        auto lr = co_await std::move(lenAw);
         if (!lr) { co_return std::unexpected(lr.error()); }
         total += *lr;
-        auto bodyAw = sink_.write_async(std::span<const char>(s.data(), s.size()));
-        auto br = co_await bodyAw;
+        auto br = co_await write_all(std::span<const char>(s.data(), s.size()));
         if (!br) { co_return std::unexpected(br.error()); }
         total += *br;
         co_return std::expected<std::size_t,std::error_code>{total};
     }
 
 private:
+    template<class Element>
+    ExpectedTask<std::size_t> write_all(std::span<const Element> data) {
+        std::size_t written = 0;
+        while (written < data.size()) {
+            auto aw = sink_.write_async(data.subspan(written));
+            auto result = co_await std::move(aw);
+            if (!result) {
+                co_return std::unexpected(result.error());
+            }
+            if (*result == 0) {
+                co_return std::unexpected(std::make_error_code(std::errc::io_error));
+            }
+            written += *result;
+        }
+        co_return std::expected<std::size_t, std::error_code>{written};
+    }
+
     S sink_;
     std::endian order_;
 };
@@ -109,7 +134,7 @@ public:
         std::size_t filled = 0;
         while (filled < n) {
             auto aw = source_.read_async(reinterpret_cast<char*>(buf.data()) + filled, n - filled);
-            auto r  = co_await aw;
+            auto r  = co_await std::move(aw);
             if (!r) { co_return std::unexpected(r.error()); }
             if (*r == 0) {
                 co_return std::unexpected(std::make_error_code(std::errc::result_out_of_range));

@@ -29,8 +29,6 @@ auto sync_run3(MakeAwaitable make_awaitable) {
     // Single-attempt synchronous runner: create a fresh awaitable and run it
     // to completion via IoTask. Keep the IoTask alive via shared_ptr to avoid
     // premature destruction when the caller runs the task in another thread.
-    using Awaitable = decltype(make_awaitable());
-    using R = decltype(std::declval<Awaitable>().await_resume());
     auto runner = test_helpers::run_awaitable(make_awaitable());
     auto sp = std::make_shared<decltype(runner)>(std::move(runner));
     return sp->get();

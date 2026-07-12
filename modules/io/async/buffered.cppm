@@ -10,6 +10,7 @@ module;
 #include <expected>
 #include <memory>
 #include <coroutine>
+#include <utility>
 #endif
 
 export module modern_io.async_buffered;
@@ -24,6 +25,7 @@ import <cstring>;
 import <span>;
 import <expected>;
 import <coroutine>;
+import <utility>;
 #endif
 
 namespace modern::io
@@ -76,12 +78,8 @@ public:
             if (!fr) return fr;
             return {};
         }
-        // Attempt an immediate drain only when the awaiter is ready.
         auto aw = sink_.write_async(buffer_.data(), pos_);
-        if (!aw.await_ready()) {
-            return std::unexpected(std::make_error_code(std::errc::operation_would_block));
-        }
-        auto r = aw.await_resume();
+        auto r = std::move(aw).get();
         if (!r) return std::unexpected(r.error());
         if (*r != pos_) return std::unexpected(std::make_error_code(std::errc::io_error));
         pos_ = 0;
@@ -94,7 +92,7 @@ public:
         if (pos_ == 0) {
             auto fr = sink_.flush();
             if (!fr) co_return std::unexpected(fr.error());
-            co_return {};
+            co_return std::expected<void, std::error_code>{};
         }
         auto r = co_await sink_.write_async(buffer_.data(), pos_);
         if (!r) co_return std::unexpected(r.error());
@@ -102,7 +100,7 @@ public:
         pos_ = 0;
         auto fr = sink_.flush();
         if (!fr) co_return std::unexpected(fr.error());
-        co_return {};
+        co_return std::expected<void, std::error_code>{};
     }
 
 private:

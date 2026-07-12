@@ -186,11 +186,11 @@ TEST(AsyncBufferedOutputStreamTest, UsesConnectionArenaWithoutUpstreamAllocation
 
     AsyncBufferedOutputStream<CountingAsyncOutputStream, 64> buffered(std::move(counter), arena);
 
-    auto write_result = buffered.write_async("hello", 5).sync_wait();
+    auto write_result = buffered.write_async("hello", 5).get();
     ASSERT_TRUE((bool)write_result);
     EXPECT_EQ(write_result.value(), 5u);
 
-    auto flush_result = buffered.flush_async().sync_wait();
+    auto flush_result = buffered.flush_async().get();
     ASSERT_TRUE((bool)flush_result);
 
     EXPECT_EQ(upstream.allocation_count, 0u);

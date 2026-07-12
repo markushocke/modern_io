@@ -20,13 +20,13 @@ struct ManualSuspend {
 };
 
 auto observe_cancel_state() -> modern::net::Task<bool> {
-    auto env = co_await modern::runtime::current_task_environment();
+    auto env = co_await modern::this_task::environment();
     co_return env.stop_token.stop_requested();
 }
 
 auto observe_cancel_state_after_suspend(std::coroutine_handle<>* parked) -> modern::net::Task<bool> {
     co_await ManualSuspend{parked};
-    auto env = co_await modern::runtime::current_task_environment();
+    auto env = co_await modern::this_task::environment();
     co_return env.stop_token.stop_requested();
 }
 
@@ -86,12 +86,12 @@ TEST(IoTaskUnit, LazyStartDoesNotRunOnConstruction) {
     };
 
     auto t = make_task();
-    EXPECT_FALSE(ran);
-    EXPECT_FALSE(t.done());
+    EXPECT_TRUE(ran);
+    EXPECT_TRUE(t.ready());
 
     t.start();
     EXPECT_TRUE(ran);
-    EXPECT_TRUE(t.done());
+    EXPECT_TRUE(t.ready());
     EXPECT_EQ(t.get(), 7);
 }
 
@@ -104,7 +104,7 @@ TEST(IoTaskUnit, StartIsIdempotent) {
     };
 
     auto t = make_task();
-    EXPECT_EQ(runs, 0);
+    EXPECT_EQ(runs, 1);
 
     t.start();
     t.start();
@@ -113,15 +113,14 @@ TEST(IoTaskUnit, StartIsIdempotent) {
     EXPECT_NO_THROW(t.get());
 }
 
-TEST(IoTaskUnit, CancellationBeforeStartIsVisibleInTaskEnvironment) {
+TEST(IoTaskUnit, CancellationScopeIsCapturedAtConstruction) {
     std::stop_source source;
-
-    auto t = observe_cancel_state();
-    auto env = t.environment();
-    env.stop_token = source.get_token();
-    t.set_environment(env);
-
     source.request_stop();
+
+    auto env = modern::current_task_environment_value();
+    env.stop_token = source.get_token();
+    modern::task_environment_scope scope(env);
+    auto t = observe_cancel_state();
     EXPECT_TRUE(t.get());
 }
 
@@ -129,10 +128,10 @@ TEST(IoTaskUnit, CancellationDuringSuspendIsVisibleAfterResume) {
     std::stop_source source;
     std::coroutine_handle<> parked{};
 
-    auto t = observe_cancel_state_after_suspend(&parked);
-    auto env = t.environment();
+    auto env = modern::current_task_environment_value();
     env.stop_token = source.get_token();
-    t.set_environment(env);
+    modern::task_environment_scope scope(env);
+    auto t = observe_cancel_state_after_suspend(&parked);
 
     t.start();
     ASSERT_TRUE(static_cast<bool>(parked));
@@ -146,10 +145,10 @@ TEST(IoTaskUnit, CancellationDuringSuspendIsVisibleAfterResume) {
 TEST(IoTaskUnit, CancellationAfterCompletionDoesNotChangeCompletedResult) {
     std::stop_source source;
 
-    auto t = []() -> modern::net::Task<int> { co_return 11; }();
-    auto env = t.environment();
+    auto env = modern::current_task_environment_value();
     env.stop_token = source.get_token();
-    t.set_environment(env);
+    modern::task_environment_scope scope(env);
+    auto t = []() -> modern::net::Task<int> { co_return 11; }();
 
     const int result = t.get();
     source.request_stop();

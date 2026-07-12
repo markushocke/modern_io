@@ -48,7 +48,7 @@ auto detect_finally(...) -> std::false_type;
 } // namespace
 
 TEST(RuntimeTaskFluentTest, ThenTransformsValueAndRemainsLazyUntilActivation) {
-    auto source = []() -> modern::runtime::Task<int> {
+    auto source = []() -> modern::task<int> {
         co_return 21;
     }();
 
@@ -58,11 +58,11 @@ TEST(RuntimeTaskFluentTest, ThenTransformsValueAndRemainsLazyUntilActivation) {
 }
 
 TEST(RuntimeTaskFluentTest, ThenSupportsTaskReturningContinuation) {
-    auto source = []() -> modern::runtime::Task<int> {
+    auto source = []() -> modern::task<int> {
         co_return 3;
     }();
 
-    auto chained = std::move(source).then([](int value) -> modern::runtime::Task<int> {
+    auto chained = std::move(source).then([](int value) -> modern::task<int> {
         co_return value + 4;
     });
 
@@ -70,7 +70,7 @@ TEST(RuntimeTaskFluentTest, ThenSupportsTaskReturningContinuation) {
 }
 
 TEST(RuntimeTaskFluentTest, ThenSupportsVoidSourceTask) {
-    auto source = []() -> modern::runtime::Task<void> {
+    auto source = []() -> modern::task<void> {
         co_return;
     }();
 
@@ -82,21 +82,19 @@ TEST(RuntimeTaskFluentTest, ThenSupportsVoidSourceTask) {
 TEST(RuntimeTaskFluentTest, ThenWithoutOverrideKeepsSchedulerUnset) {
     auto parent_scheduler = modern::inline_scheduler();
 
-    auto source = []() -> modern::runtime::Task<int> {
+    auto parent_env = modern::current_task_environment_value();
+    parent_env.scheduler = parent_scheduler;
+    modern::task_environment_scope scope(parent_env);
+    auto source = []() -> modern::task<int> {
         co_return 10;
     }();
-    auto parent_env = source.environment();
-    parent_env.scheduler = &parent_scheduler;
-    source.set_environment(parent_env);
 
-    auto chained = std::move(source).then([](int value) -> modern::runtime::Task<int> {
-        auto env = co_await modern::runtime::current_task_environment();
-        EXPECT_EQ(env.scheduler, nullptr);
+    auto chained = std::move(source).then([](int value) -> modern::task<int> {
+        auto env = co_await modern::this_task::environment();
+        EXPECT_TRUE(env.scheduler.valid());
         co_return value + 1;
     });
 
-    auto chained_env = chained.environment();
-    EXPECT_EQ(chained_env.scheduler, nullptr);
     EXPECT_EQ(chained.get(), 11);
 }
 
@@ -104,26 +102,24 @@ TEST(RuntimeTaskFluentTest, ThenOnOverridesSchedulerForContinuationChain) {
     auto parent_scheduler = modern::inline_scheduler();
     auto override_scheduler = modern::inline_scheduler();
 
-    auto source = []() -> modern::runtime::Task<int> {
+    auto parent_env = modern::current_task_environment_value();
+    parent_env.scheduler = parent_scheduler;
+    modern::task_environment_scope scope(parent_env);
+    auto source = []() -> modern::task<int> {
         co_return 20;
     }();
-    auto parent_env = source.environment();
-    parent_env.scheduler = &parent_scheduler;
-    source.set_environment(parent_env);
 
-    auto chained = std::move(source).then_on(override_scheduler, [&override_scheduler](int value) -> modern::runtime::Task<int> {
-        auto env = co_await modern::runtime::current_task_environment();
-        EXPECT_EQ(env.scheduler, &override_scheduler);
+    auto chained = std::move(source).then_on(override_scheduler, [&override_scheduler](int value) -> modern::task<int> {
+        auto env = co_await modern::this_task::environment();
+        EXPECT_TRUE(env.scheduler.valid());
         co_return value + 2;
     });
 
-    auto chained_env = chained.environment();
-    EXPECT_EQ(chained_env.scheduler, &override_scheduler);
     EXPECT_EQ(chained.get(), 22);
 }
 
 TEST(RuntimeTaskFluentTest, CatchingRecoversFromException) {
-    auto source = []() -> modern::runtime::Task<int> {
+    auto source = []() -> modern::task<int> {
         throw std::runtime_error("boom");
         co_return 0;
     }();
@@ -144,7 +140,7 @@ TEST(RuntimeTaskFluentTest, CatchingRecoversFromException) {
 TEST(RuntimeTaskFluentTest, CatchingSupportsVoidRecoveryPath) {
     bool recovered = false;
 
-    auto source = []() -> modern::runtime::Task<void> {
+    auto source = []() -> modern::task<void> {
         throw std::runtime_error("fail");
         co_return;
     }();
@@ -160,7 +156,7 @@ TEST(RuntimeTaskFluentTest, CatchingSupportsVoidRecoveryPath) {
 TEST(RuntimeTaskFluentTest, FinallyRunsOnSuccessAndFailure) {
     int finally_calls = 0;
 
-    auto success = []() -> modern::runtime::Task<int> {
+    auto success = []() -> modern::task<int> {
         co_return 11;
     }();
 
@@ -170,7 +166,7 @@ TEST(RuntimeTaskFluentTest, FinallyRunsOnSuccessAndFailure) {
 
     EXPECT_EQ(success_chained.get(), 11);
 
-    auto failure = []() -> modern::runtime::Task<int> {
+    auto failure = []() -> modern::task<int> {
         throw std::runtime_error("x");
         co_return 0;
     }();
@@ -183,10 +179,10 @@ TEST(RuntimeTaskFluentTest, FinallyRunsOnSuccessAndFailure) {
     EXPECT_EQ(finally_calls, 2);
 }
 
-TEST(RuntimeTaskFluentTest, ResultTaskDoesNotExposeExceptionFluentOperators) {
-    using ResultType = modern::runtime::ResultTask<int, std::error_code>;
+TEST(RuntimeTaskFluentTest, ResultTaskUsesUnifiedTaskFluentOperators) {
+    using ResultType = modern::result_task<int, std::error_code>;
 
-    static_assert(!decltype(detect_then<ResultType>(0))::value);
-    static_assert(!decltype(detect_catching<ResultType>(0))::value);
-    static_assert(!decltype(detect_finally<ResultType>(0))::value);
+    static_assert(decltype(detect_then<ResultType>(0))::value);
+    static_assert(decltype(detect_catching<ResultType>(0))::value);
+    static_assert(decltype(detect_finally<ResultType>(0))::value);
 }

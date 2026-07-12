@@ -11,8 +11,8 @@ The project uses one task core with two usage styles:
 
 The canonical core remains:
 
-- `modern::runtime::Task<T>`
-- `modern::runtime::ResultTask<T, E>`
+- `modern::task<T>`
+- `modern::result_task<T, E>`
 
 `modern::io::ExpectedTask<T>` and `modern::net::Task<T>` stay domain aliases over the runtime core.
 
@@ -33,25 +33,25 @@ Design consequence:
 
 ### 2.2 Start Semantics
 
-Tasks are lazy by default.
+Tasks start when constructed.
 
-Work starts on first activation point:
+Activation points consume or observe already-created task state:
 
 - `co_await t`
 - fluent activation (`then` chain binding)
-- `get()` / `sync_wait()`
-- explicit `start()`
+- `get()`
+- explicit `start()` as a compatibility no-op
 
-Task construction alone must not start work.
+Task construction captures the current task environment.
 
-### 2.3 Error-Channel Separation
+### 2.3 Unified Task Surface
 
-`Task<T>` and `ResultTask<T, E>` have different operator sets.
+`task<T>` and `result_task<T, E>` use the same runtime task type.
 
-- `Task<T>`: exception-channel operators (`then`, `catching`, `finally`)
-- `ResultTask<T, E>`: expected-channel operators (`transform`, `or_else`, optional `then_value` / `then_error`)
+- `task<T>`: exception-channel operators (`then`, `catching`, `finally`)
+- `result_task<T, E>`: alias for `task<std::expected<T, E>>`; expected-channel handling is explicit inside `then`
 
-No implicit mixing of exception and `E` channels is allowed.
+No silent conversion or channel loss is allowed.
 
 ## 3. Contract Domains
 
@@ -118,7 +118,7 @@ The target model includes stream semantics in the same architecture:
 A change is contract-compliant only if it provides:
 
 1. tests for cancellation behavior (before start, during suspend/await, after completion)
-2. tests for lazy start semantics
-3. tests for operator-set separation (`Task` vs `ResultTask`)
+2. tests for eager start semantics and environment capture
+3. tests for unified fluent operators on `task` and `result_task`
 4. explicit bridge conversion tests for error channels
 5. documentation updates when public semantics change

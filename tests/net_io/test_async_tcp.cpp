@@ -368,9 +368,9 @@ TEST(AsyncTcpTest, StopClearsPendingAcceptRegistration) {
     const int stale_fd = first_server.native_handle();
     {
         auto pending_accept = first_server.accept();
-        pending_accept.native_handle().resume();
-        ASSERT_FALSE(pending_accept.native_handle().done());
+        ASSERT_FALSE(pending_accept.ready());
         first_server.stop();
+        pending_accept.detach();
     }
 
     bool reused_fd = false;

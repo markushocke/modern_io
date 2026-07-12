@@ -44,12 +44,10 @@ struct Detached {
     };
 };
 
-// Helper to synchronously wait on ExpectedTask<void>.
-// The task has to be started explicitly because initial_suspend uses suspend_always.
+// Helper to synchronously wait on ExpectedTask<T>.
 template<typename T>
 static std::expected<T, std::error_code> run_and_wait(ExpectedTask<T> t) {
-    t.start();                // initial_suspend = suspend_always → start explicitly
-    return t.sync_wait();     // sync_wait installs its own continuation after the task was started
+    return t.get();
 }
 
 void io_dual_style_example(EventReactor& loop) {
@@ -147,11 +145,11 @@ void io_dual_style_example(EventReactor& loop) {
 
     auto fluent_result = run_and_wait(
         std::move(udp_roundtrip_task("IO-THEN-PING"))
-            .then_value([](std::string reply) {
-                return reply + " (then_value)";
-            })
-            .then_error([](std::error_code error) {
-                return std::expected<std::string, std::error_code>{std::unexpected(error)};
+            .then([](std::expected<std::string, std::error_code> reply) {
+                if (!reply) {
+                    return reply;
+                }
+                return std::expected<std::string, std::error_code>{*reply + " (then)"};
             }));
 
     fluent_server_thread.join();
@@ -295,11 +293,11 @@ void io_dual_style_tcp_example(EventReactor& loop) {
 
     auto fluent_result = run_and_wait(
         std::move(tcp_roundtrip_task("IO-TCP-THEN-PING"))
-            .then_value([](std::string reply) {
-                return reply + " (then_value)";
-            })
-            .then_error([](std::error_code error) {
-                return std::expected<std::string, std::error_code>{std::unexpected(error)};
+            .then([](std::expected<std::string, std::error_code> reply) {
+                if (!reply) {
+                    return reply;
+                }
+                return std::expected<std::string, std::error_code>{*reply + " (then)"};
             }));
 
     fluent_server_thread.join();
@@ -742,7 +740,7 @@ void async_buffered_example(EventReactor& loop) {
 
         auto w = co_await dout.write_string("Hello Async Buffer!");
         if (!w) co_return std::unexpected(w.error());
-        auto f = dout.flush();
+        auto f = co_await dout.flush_async();
         if (!f) co_return std::unexpected(f.error());
 
         AsyncBufferedInputStream bin(stream);
@@ -751,7 +749,7 @@ void async_buffered_example(EventReactor& loop) {
         if (s_res) {
             std::osyncstream(std::cout) << "[AsyncBuffered] Read: " << *s_res << '\n';
         }
-        co_return {};
+        co_return std::expected<void, std::error_code>{};
     };
 
     auto bt = task(address, ASYNC_BUFFERED_PORT);

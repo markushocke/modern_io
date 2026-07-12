@@ -24,7 +24,7 @@ endfunction()
 
 function(modern_io_resolve_runtime_target out_target)
   set(options)
-  set(oneValueArgs DEFAULT_PROVIDER LOCAL_ROOT FETCH_REPOSITORY FETCH_TAG BINARY_DIR)
+  set(oneValueArgs DEFAULT_PROVIDER LOCAL_ROOT FETCH_REPOSITORY FETCH_TAG SOURCE_DIR BINARY_DIR)
   cmake_parse_arguments(MODERN_RUNTIME_RESOLVE "${options}" "${oneValueArgs}" "" ${ARGN})
 
   if(NOT DEFINED MODERN_RUNTIME_PROVIDER OR MODERN_RUNTIME_PROVIDER STREQUAL "")
@@ -49,6 +49,11 @@ function(modern_io_resolve_runtime_target out_target)
   if((NOT DEFINED MODERN_RUNTIME_BINARY_DIR OR MODERN_RUNTIME_BINARY_DIR STREQUAL "")
       AND NOT MODERN_RUNTIME_RESOLVE_BINARY_DIR STREQUAL "")
     set(MODERN_RUNTIME_BINARY_DIR "${MODERN_RUNTIME_RESOLVE_BINARY_DIR}")
+  endif()
+
+  if((NOT DEFINED MODERN_RUNTIME_SOURCE_DIR OR MODERN_RUNTIME_SOURCE_DIR STREQUAL "")
+      AND NOT MODERN_RUNTIME_RESOLVE_SOURCE_DIR STREQUAL "")
+    set(MODERN_RUNTIME_SOURCE_DIR "${MODERN_RUNTIME_RESOLVE_SOURCE_DIR}")
   endif()
 
   if(TARGET modern_runtime::modern_runtime)
@@ -86,11 +91,19 @@ function(modern_io_resolve_runtime_target out_target)
 
     include(FetchContent)
     if(NOT TARGET modern_runtime AND NOT TARGET modern_runtime::modern_runtime)
+      set(_modern_runtime_fetch_content_args)
+      if(DEFINED MODERN_RUNTIME_SOURCE_DIR AND NOT MODERN_RUNTIME_SOURCE_DIR STREQUAL "")
+        list(APPEND _modern_runtime_fetch_content_args SOURCE_DIR "${MODERN_RUNTIME_SOURCE_DIR}")
+      endif()
+      if(DEFINED MODERN_RUNTIME_BINARY_DIR AND NOT MODERN_RUNTIME_BINARY_DIR STREQUAL "")
+        list(APPEND _modern_runtime_fetch_content_args BINARY_DIR "${MODERN_RUNTIME_BINARY_DIR}")
+      endif()
       FetchContent_Declare(
         modern_runtime
         GIT_REPOSITORY "${MODERN_RUNTIME_GIT_REPOSITORY}"
         GIT_TAG "${MODERN_RUNTIME_GIT_TAG}"
         GIT_SHALLOW TRUE
+        ${_modern_runtime_fetch_content_args}
       )
       FetchContent_MakeAvailable(modern_runtime)
     endif()

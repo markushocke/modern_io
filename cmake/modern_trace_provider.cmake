@@ -24,7 +24,7 @@ endfunction()
 
 function(modern_io_resolve_trace_target out_target)
   set(options)
-  set(oneValueArgs DEFAULT_PROVIDER LOCAL_ROOT FETCH_REPOSITORY FETCH_TAG BINARY_DIR)
+  set(oneValueArgs DEFAULT_PROVIDER LOCAL_ROOT FETCH_REPOSITORY FETCH_TAG SOURCE_DIR BINARY_DIR)
   cmake_parse_arguments(MODERN_TRACE_RESOLVE "${options}" "${oneValueArgs}" "" ${ARGN})
 
   if(NOT DEFINED MODERN_TRACE_PROVIDER OR MODERN_TRACE_PROVIDER STREQUAL "")
@@ -57,7 +57,12 @@ function(modern_io_resolve_trace_target out_target)
 
   if((NOT DEFINED MODERN_TRACE_BINARY_DIR OR MODERN_TRACE_BINARY_DIR STREQUAL "")
       AND NOT MODERN_TRACE_RESOLVE_BINARY_DIR STREQUAL "")
-    set(MODERN_TRACE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/modern_trace")
+    set(MODERN_TRACE_BINARY_DIR "${MODERN_TRACE_RESOLVE_BINARY_DIR}")
+  endif()
+
+  if((NOT DEFINED MODERN_TRACE_SOURCE_DIR OR MODERN_TRACE_SOURCE_DIR STREQUAL "")
+      AND NOT MODERN_TRACE_RESOLVE_SOURCE_DIR STREQUAL "")
+    set(MODERN_TRACE_SOURCE_DIR "${MODERN_TRACE_RESOLVE_SOURCE_DIR}")
   endif()
 
   if(TARGET modern_trace::modern_trace)
@@ -95,11 +100,19 @@ function(modern_io_resolve_trace_target out_target)
 
     include(FetchContent)
     if(NOT TARGET modern_trace AND NOT TARGET modern_trace::modern_trace)
+      set(_modern_trace_fetch_content_args)
+      if(DEFINED MODERN_TRACE_SOURCE_DIR AND NOT MODERN_TRACE_SOURCE_DIR STREQUAL "")
+        list(APPEND _modern_trace_fetch_content_args SOURCE_DIR "${MODERN_TRACE_SOURCE_DIR}")
+      endif()
+      if(DEFINED MODERN_TRACE_BINARY_DIR AND NOT MODERN_TRACE_BINARY_DIR STREQUAL "")
+        list(APPEND _modern_trace_fetch_content_args BINARY_DIR "${MODERN_TRACE_BINARY_DIR}")
+      endif()
       FetchContent_Declare(
         modern_trace
         GIT_REPOSITORY "${MODERN_TRACE_GIT_REPOSITORY}"
         GIT_TAG "${MODERN_TRACE_GIT_TAG}"
         GIT_SHALLOW TRUE
+        ${_modern_trace_fetch_content_args}
       )
       FetchContent_MakeAvailable(modern_trace)
     endif()

@@ -10,6 +10,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/modern_trace_provider.cmake)
 set(MODERN_IO_PACKAGE_NAME modern_io)
 set(MODERN_IO_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/${MODERN_IO_PACKAGE_NAME}")
 set(MODERN_IO_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(MODERN_IO_DEPENDENCIES_DIR "${CMAKE_CURRENT_BINARY_DIR}/dependencies" CACHE PATH "Directory for dependency git checkouts")
 
 # ----------------------------
 # 1) General C++23 settings
@@ -47,12 +48,14 @@ find_package(Threads REQUIRED)
 
 set(MODERN_RUNTIME_PROVIDER "fetch" CACHE STRING "How to resolve modern_runtime: package, local, or fetch")
 set_property(CACHE MODERN_RUNTIME_PROVIDER PROPERTY STRINGS package local fetch)
-set(MODERN_RUNTIME_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../modern_runtime" CACHE PATH "Path to a local modern_runtime checkout")
+set(MODERN_RUNTIME_ROOT "${MODERN_IO_DEPENDENCIES_DIR}/modern_runtime" CACHE PATH "Path to a local modern_runtime checkout")
+set(MODERN_RUNTIME_SOURCE_DIR "${MODERN_IO_DEPENDENCIES_DIR}/modern_runtime" CACHE PATH "FetchContent source checkout directory for modern_runtime")
 set(MODERN_RUNTIME_GIT_REPOSITORY "https://github.com/markushocke/modern_runtime.git" CACHE STRING "Git repository used when MODERN_RUNTIME_PROVIDER=fetch")
 set(MODERN_RUNTIME_GIT_TAG "main" CACHE STRING "Git tag or branch used when MODERN_RUNTIME_PROVIDER=fetch")
-set(MODERN_TRACE_PROVIDER "auto" CACHE STRING "How to resolve modern_trace: auto, package, local, or fetch")
+set(MODERN_TRACE_PROVIDER "fetch" CACHE STRING "How to resolve modern_trace: auto, package, local, or fetch")
 set_property(CACHE MODERN_TRACE_PROVIDER PROPERTY STRINGS auto package local fetch)
-set(MODERN_TRACE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../modern_trace" CACHE PATH "Path to a local modern_trace checkout")
+set(MODERN_TRACE_ROOT "${MODERN_IO_DEPENDENCIES_DIR}/modern_trace" CACHE PATH "Path to a local modern_trace checkout")
+set(MODERN_TRACE_SOURCE_DIR "${MODERN_IO_DEPENDENCIES_DIR}/modern_trace" CACHE PATH "FetchContent source checkout directory for modern_trace")
 set(MODERN_TRACE_GIT_REPOSITORY "https://github.com/markushocke/modern_trace.git" CACHE STRING "Git repository used when MODERN_TRACE_PROVIDER=fetch")
 set(MODERN_TRACE_GIT_TAG "main" CACHE STRING "Git tag or branch used when MODERN_TRACE_PROVIDER=fetch")
 
@@ -62,6 +65,7 @@ modern_io_resolve_trace_target(
   LOCAL_ROOT "${MODERN_TRACE_ROOT}"
   FETCH_REPOSITORY "${MODERN_TRACE_GIT_REPOSITORY}"
   FETCH_TAG "${MODERN_TRACE_GIT_TAG}"
+  SOURCE_DIR "${MODERN_TRACE_SOURCE_DIR}"
   BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/modern_trace"
 )
 
@@ -71,6 +75,7 @@ modern_io_resolve_runtime_target(
   LOCAL_ROOT "${MODERN_RUNTIME_ROOT}"
   FETCH_REPOSITORY "${MODERN_RUNTIME_GIT_REPOSITORY}"
   FETCH_TAG "${MODERN_RUNTIME_GIT_TAG}"
+  SOURCE_DIR "${MODERN_RUNTIME_SOURCE_DIR}"
   BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/modern_runtime"
 )
 

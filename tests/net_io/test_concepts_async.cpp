@@ -5,12 +5,15 @@ import net_io.async_stream_adapters;
 import net_io.scheduler;
 import net_io.task;
 import modern_io.concepts;
+import modern_io.stream;
 import net_io.async_concepts;
 import net_io.event_loop;
 #include <span>
 #include <expected>
 #include <system_error>
 #include <coroutine>
+#include <memory>
+#include <utility>
 
 // Check that AsyncTcpSocket fulfills AsyncInputStream/AsyncOutputStream like API
 static_assert(requires(modern::net::AsyncTcpSocket& s, std::span<char> rb, std::span<const char> wb) {
@@ -34,6 +37,19 @@ static_assert(std::same_as<modern::net::Task<int>, net_io::Task<int>>, "Legacy T
 static_assert(std::same_as<modern::net::IoTask<int>, net_io::IoTask<int>>, "Legacy IoTask name must remain compatible");
 static_assert(std::same_as<modern::net::IScheduler, net_io::IScheduler>, "Legacy IScheduler name must remain compatible");
 static_assert(std::same_as<modern::net::AsyncTcpStreamAdapter, net_io::AsyncTcpStreamAdapter>, "Legacy AsyncTcpStreamAdapter name must remain compatible");
+
+using AdaptedTcpStream = decltype(modern::net::as_stream(std::declval<std::shared_ptr<modern::net::AsyncTcpSocket>>()));
+using AdaptedUdpStream = decltype(modern::net::as_stream(std::declval<std::shared_ptr<modern::net::AsyncUdpSocket>>()));
+static_assert(modern::io::AsyncDuplexStream<AdaptedTcpStream>);
+static_assert(modern::io::AsyncDuplexStream<AdaptedUdpStream>);
+
+template<class T>
+concept AsyncStreamAdaptable = requires(T&& value) {
+    modern::net::as_stream(std::forward<T>(value));
+};
+
+static_assert(!AsyncStreamAdaptable<modern::net::AsyncTcpSocket*>);
+static_assert(!AsyncStreamAdaptable<modern::net::AsyncUdpSocket*>);
 
 static_assert(modern::net::NativeIoHandle<modern::net::AsyncTcpSocket>, "AsyncTcpSocket must expose a runtime-registerable native handle");
 static_assert(std::same_as<modern::net::AsyncTcpSocket, net_io::AsyncTcpSocket>, "Legacy AsyncTcpSocket name must remain compatible");

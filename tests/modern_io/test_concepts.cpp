@@ -59,6 +59,11 @@ public:
     }
 };
 
+class MockDuplexStream : public MockInputStream, public MockOutputStream {
+public:
+    MockDuplexStream() : MockInputStream({}) {}
+};
+
 // Incomplete type (should NOT satisfy concepts)
 class IncompleteOutputStream {
 public:
@@ -86,6 +91,12 @@ TEST(ConceptsTest, InputStreamConcept) {
     
     // IncompleteInputStream should NOT satisfy InputStream
     static_assert(!InputStream<IncompleteInputStream>, "IncompleteInputStream should not satisfy InputStream concept");
+}
+
+TEST(ConceptsTest, DuplexStreamRequiresBothDirections) {
+    static_assert(DuplexStream<MockDuplexStream>);
+    static_assert(!DuplexStream<MockInputStream>);
+    static_assert(!DuplexStream<MockOutputStream>);
 }
 
 TEST(ConceptsTest, MockOutputStreamBasicOperation) {

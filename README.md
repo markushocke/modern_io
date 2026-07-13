@@ -10,16 +10,16 @@ Built on modules, concepts, `std::expected`, `modern_trace` for the shared trace
 The framework is split into modules that implement the shared concept hierarchy:
 
 ```
-                      Concepts
+                  Stream Capabilities
                           │
         ┌─────────────────┼─────────────────┐
         │                 │                 │
         ▼                 ▼                 ▼
-   File I/O          TCP Networking    UDP Networking
+   File Streams      TCP Resources     UDP Resources
         │                 │                 │
-        └─────────────────┼─────────────────┘
-                          │
-                    make_stream()
+        │                 └────────┬────────┘
+        │                          │
+        │                     as_stream()
                           │
         ┌─────────────────┼─────────────────┐
         │                                   │
@@ -82,6 +82,7 @@ modification.
 |------|--------|
 | `InputStream` | `AsyncInputStream` |
 | `OutputStream` | `AsyncOutputStream` |
+| `DuplexStream` | `AsyncDuplexStream` |
 
 
 ### Concept Documentation
@@ -99,19 +100,26 @@ modification.
 - **Type-safe APIs**: Concepts enforce compile-time correctness across all I/O operations.
 - **C++23 modules and concepts**: Leverages modern C++ features for better organization and type safety.
 - **Zero-overhead abstractions**: No runtime overhead from the conceptual model.
-- **Transport-independent stream adapters**: Adapters like `make_stream()` work across files, TCP, UDP, and future transports.
+- **Explicit resource lifecycle**: Opening, connecting, and binding remain visible operations.
+- **Transport-independent stream adapters**: `as_stream()` adapts an already-open resource without hidden I/O.
 
 ### Transport Adapters
 
-A core feature of modern_io is the ability to create streams from various transports using `make_stream()`:
+A core feature of modern_io is the separation between resource setup and stream adaptation:
 
 ```cpp
-auto stream = make_stream(File(...));
-auto stream = make_stream(TcpEndpoint("127.0.0.1", 9000));
-auto stream = make_stream(UdpEndpoint("127.0.0.1", 9000));
+FileInputStream file("input.bin"); // Already models InputStream.
+
+auto tcp = std::make_shared<TcpClient>(TcpEndpoint("127.0.0.1", 9000));
+tcp->open();
+auto tcp_stream = as_stream(tcp);
+
+auto udp = std::make_shared<UdpTransport>();
+udp->open_connect(UdpEndpoint("127.0.0.1", 9000));
+auto udp_stream = as_stream(udp);
 ```
 
-All these streams expose the same `DataStream` API, enabling consistent I/O operations across different transports.
+`as_stream()` only adapts and retains the resource. It never opens, connects, binds, or takes ownership of a raw pointer. The resulting streams compose with the same data and buffering layers.
 
 
 ---
@@ -176,7 +184,7 @@ auto value = din.read_int32();   // 42
 auto msg   = din.read_string();  // "Hello"
 ```
 
-### Sync TCP — one-liner client via `make_stream`
+### Sync TCP — explicit connection and stream adaptation
 
 ```cpp
 import modern_io;
@@ -185,14 +193,15 @@ import net_io_adapters;
 using namespace net_io;
 using namespace net_io_adapters;
 
-// Endpoint → socket → adapter: fully deduced
-auto stream = make_stream(TcpEndpoint("127.0.0.1", 9000));
+auto client = std::make_shared<TcpClient>(TcpEndpoint("127.0.0.1", 9000));
+client->open();
+auto stream = as_stream(client);
 DataOutputStream out(stream, std::endian::big);
 out.write_string("Hello TCP");
 out.flush();
 ```
 
-The same pattern works for UDP — just pass a `UdpEndpoint` instead.
+UDP follows the same pattern with `UdpTransport::open_connect()` or `open_bind()` before `as_stream()`.
 
 ### Sync TCP Echo Server
 
@@ -339,7 +348,8 @@ public:
 
 // 2. All existing adapters and data streams work immediately
 auto tls = std::make_shared<TlsClient>(/* ... */);
-auto stream = make_stream(tls);   // TransportSource + TransportSink, deduced
+tls->open();
+auto stream = as_stream(tls);   // TransportSource + TransportSink, deduced
 DataOutputStream out(stream, std::endian::big);
 out.write_string("Hello TLS");
 out.flush();

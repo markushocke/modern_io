@@ -76,7 +76,7 @@ void io_dual_style_example(EventReactor& loop) {
             run.ready.count_down();
 
             auto serve_once = [sock]() -> ExpectedTask<void> {
-                AsyncUdpStreamAdapter stream(sock);
+                auto stream = as_stream(sock);
                 char buf[128]{};
 
                 auto r = co_await stream.read_async(std::span<char>(buf, sizeof(buf)));
@@ -100,7 +100,7 @@ void io_dual_style_example(EventReactor& loop) {
         auto bind_res = sock->bind(client_sa, sizeof(client_sa));
         if (!bind_res) co_return std::unexpected(bind_res.error());
 
-        AsyncUdpStreamAdapter stream(sock);
+        auto stream = as_stream(sock);
         UdpEndpoint target_ep(address, IO_DEMO_UDP_PORT);
         auto target_sa = target_ep.to_sockaddr(false);
         stream.set_default_target(target_sa, sizeof(target_sa));
@@ -204,7 +204,7 @@ void io_dual_style_tcp_example(EventReactor& loop) {
                     co_return std::unexpected(accepted.error());
                 }
 
-                AsyncTcpStreamAdapter stream(accepted.value());
+                auto stream = as_stream(accepted.value());
                 AsyncDataInputStream in(stream);
                 AsyncDataOutputStream out(stream);
 
@@ -241,7 +241,7 @@ void io_dual_style_tcp_example(EventReactor& loop) {
             co_return std::unexpected(connect_res.error());
         }
 
-        AsyncTcpStreamAdapter stream(sock);
+        auto stream = as_stream(sock);
         AsyncDataOutputStream out(stream);
         AsyncDataInputStream in(stream);
 
@@ -345,7 +345,9 @@ void tcp_server() {
 // Synchronous UDP server.
 void udp_server() {
     UdpEndpoint ep{ address, UDP_PORT, true, UDP_PORT };
-    auto s = make_stream(ep);
+    auto transport = std::make_shared<UdpTransport>();
+    transport->open_bind(ep);
+    auto s = as_stream(transport);
     DataInputStream in(s);
     DataOutputStream out(s);
     std::osyncstream(std::cout) << "[UDP-Server] Waiting for datagram..." << '\n';
@@ -371,7 +373,7 @@ void async_tcp_example(EventReactor& loop) {
                 co_return std::unexpected(conn.error()); 
             }
             std::osyncstream(std::cout) << "[AsyncTCP-Client] Connected successfully\n";
-            AsyncTcpStreamAdapter stream(sock);
+            auto stream = as_stream(sock);
             std::string msg = "PING-ASYNC";
             std::osyncstream(std::cout) << "[AsyncTCP-Client] Sending: " << msg << '\n';
             auto w = co_await stream.write_async(std::span<const char>(msg.data(), msg.size()));
@@ -398,7 +400,7 @@ void async_tcp_example(EventReactor& loop) {
             }
 
             auto sock = cli.value();
-            AsyncTcpStreamAdapter stream(sock);
+            auto stream = as_stream(sock);
             char buf[64]{};
             auto r = co_await stream.read_async(std::span<char>(buf, sizeof(buf)));
             if (!r) {
@@ -458,7 +460,7 @@ void async_tcp_example(EventReactor& loop) {
 void async_udp_example(EventReactor& loop) {
     struct UdpDemo {
         static ExpectedTask<void> serve_once(std::shared_ptr<AsyncUdpSocket> sock) {
-            AsyncUdpStreamAdapter stream(sock);
+            auto stream = as_stream(sock);
             char buf[128]{};
 
             auto r = co_await stream.read_async(std::span<char>(buf, sizeof(buf)));
@@ -488,7 +490,7 @@ void async_udp_example(EventReactor& loop) {
             }
             std::osyncstream(std::cout) << "[AsyncUDP-Client] Socket bound successfully\n";
             
-            AsyncUdpStreamAdapter stream(sock);
+            auto stream = as_stream(sock);
             
             // Set the default target address through the adapter.
             UdpEndpoint ep(addr, port);
@@ -559,9 +561,9 @@ void async_udp_example(EventReactor& loop) {
 void async_tcp_server_example(EventReactor& loop) {
     constexpr uint16_t ASYNC_TCP_PORT = TCP_PORT + 10;
     auto client_handler = [](std::shared_ptr<AsyncTcpSocket> sock) -> ExpectedTask<void> {
-        AsyncTcpStreamAdapter stream(sock);
-        AsyncDataInputStream<AsyncTcpStreamAdapter>  in(stream);
-        AsyncDataOutputStream<AsyncTcpStreamAdapter> out(stream);
+        auto stream = as_stream(sock);
+        AsyncDataInputStream in(stream);
+        AsyncDataOutputStream out(stream);
 
         auto r_res = co_await in.read_string();
         if (!r_res) {
@@ -639,7 +641,7 @@ void async_tcp_server_example(EventReactor& loop) {
                                             << conn.error().message() << '\n';
                 co_return std::unexpected(conn.error());
             }
-            AsyncTcpStreamAdapter stream(sock);
+            auto stream = as_stream(sock);
             AsyncDataOutputStream out(stream);
             AsyncDataInputStream  in(stream);
 
@@ -677,7 +679,7 @@ void async_buffered_example(EventReactor& loop) {
             co_return std::unexpected(accepted.error());
         }
 
-        AsyncTcpStreamAdapter stream(accepted.value());
+        auto stream = as_stream(accepted.value());
         AsyncDataInputStream din(stream);
 
         auto msg = co_await din.read_string();
@@ -734,7 +736,7 @@ void async_buffered_example(EventReactor& loop) {
         auto conn = co_await sock->async_connect(sa, sizeof(sa));
         if (!conn) co_return std::unexpected(conn.error());
 
-        AsyncTcpStreamAdapter stream(sock);
+        auto stream = as_stream(sock);
         AsyncBufferedOutputStream bout(stream);
         AsyncDataOutputStream dout(std::move(bout));
 
@@ -780,7 +782,9 @@ int main() {
         tcp_server();
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         TcpEndpoint ep({ address, TCP_PORT });
-        auto stream = make_stream(ep);
+        auto client = std::make_shared<TcpClient>(ep);
+        client->open();
+        auto stream = as_stream(client);
         DataOutputStream out(stream);
         DataInputStream  in(stream);
         out.write_string("PING");
@@ -794,7 +798,9 @@ int main() {
         std::thread srv(udp_server);
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         UdpEndpoint client_ep(address, UDP_PORT);
-        auto stream = make_stream(client_ep);
+        auto transport = std::make_shared<UdpTransport>();
+        transport->open_connect(client_ep);
+        auto stream = as_stream(transport);
         DataOutputStream out(stream);
         DataInputStream  in(stream);
         std::osyncstream(std::cout) << "[UDP-Client] Sending UDP-PING..." << '\n';

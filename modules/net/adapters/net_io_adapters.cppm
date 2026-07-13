@@ -811,129 +811,32 @@ export namespace modern::net::adapters {
         std::shared_ptr<T> ptr_;
     };
 
-    // --- Concepts for Endpoints ---
-    /**
-     * @brief Concept for types that behave like a UDP endpoint.
-     *
-     * A type satisfies UdpEndpointLike if it provides the following members:
-     *   - address: convertible to std::string (the IP address or hostname)
-     *   - port: convertible to uint16_t (the UDP port)
-     *   - bind_local: convertible to bool (whether to bind to a local address)
-     *   - local_port: convertible to uint16_t (the local port to bind)
-     *
-     * This concept is useful for generic code that needs to accept any type
-     * representing a UDP endpoint, not just a specific class.
-     *
-     * Example:
-     * @code
-     * struct MyUdpEndpoint {
-     *     std::string address;
-     *     uint16_t port;
-     *     bool bind_local;
-     *     uint16_t local_port;
-     * };
-     * static_assert(UdpEndpointLike<MyUdpEndpoint>);
-     * @endcode
-     */
-    template<typename T>
-    concept UdpEndpointLike = requires(T ep)
+    template<net_io_concepts::Readable T>
+        requires net_io_concepts::Writable<T>
+    auto as_stream(std::shared_ptr<T> transport)
     {
-        { ep.address }    -> std::convertible_to<std::string>;
-        { ep.port }       -> std::convertible_to<uint16_t>;
-        { ep.bind_local } -> std::convertible_to<bool>;
-        { ep.local_port } -> std::convertible_to<uint16_t>;
-    };
+        auto src = TransportSource<T>(transport);
+        auto sink = TransportSink<T>(transport);
+        using DuplexType = TcpDuplexStream<decltype(src), decltype(sink)>;
+        return SharedStream<DuplexType>(std::make_shared<DuplexType>(std::move(src), std::move(sink)));
+    }
 
-    /**
-     * @brief Concept for types that behave like a TCP endpoint.
-     *
-     * A type satisfies TcpEndpointLike if it provides the following members:
-     *   - address: convertible to std::string (the IP address or hostname)
-     *   - port: convertible to uint16_t (the TCP port)
-     *
-     * This concept explicitly excludes types that satisfy UdpEndpointLike,
-     * to avoid ambiguity when a type could represent both protocols.
-     *
-     * Example:
-     * @code
-     * struct MyTcpEndpoint {
-     *     std::string address;
-     *     uint16_t port;
-     * };
-     * static_assert(TcpEndpointLike<MyTcpEndpoint>);
-     * @endcode
-     */
-    template<typename T>
-    concept TcpEndpointLike =
-        requires(T ep)
-        {
-            { ep.address } -> std::convertible_to<std::string>;
-            { ep.port }    -> std::convertible_to<uint16_t>;
-        }
-        && (!UdpEndpointLike<T>);
-
-    // --- Generic factory for arbitrary transport types (Client) ---
-    /**
-     * @brief Creates a SharedStream for arbitrary transport types.
-     *        The factory automatically detects TCP/UDP/other transports.
-     *        The return value is always a SharedStream that satisfies InputStream/OutputStream.
-     *
-     * Example:
-     *   auto stream = make_stream(TcpEndpoint{...});
-     *   auto stream = make_stream(UdpEndpoint{...});
-     *   auto stream = make_stream(std::make_shared<MyTransport>(...));
-     */
-    template<typename EndpointOrTransport>
-    auto make_stream(EndpointOrTransport&& ep_or_transport)
+    inline auto as_stream(std::shared_ptr<modern::net::UdpTransport> transport)
     {
-        using T = std::decay_t<EndpointOrTransport>;
-        if constexpr (TcpEndpointLike<T>) {
-            // TCP Endpoint: create TcpClient, open connection, adapt
-            auto client = std::make_shared<modern::net::TcpClient>(std::forward<EndpointOrTransport>(ep_or_transport));
-            client->open();
-            auto src  = TransportSource<modern::net::TcpClient>(client);
-            auto sink = TransportSink<modern::net::TcpClient>(client);
-            using DuplexType = TcpDuplexStream<decltype(src), decltype(sink)>;
-            auto duplex = std::make_shared<DuplexType>(std::move(src), std::move(sink));
-            return SharedStream<DuplexType>(duplex);
-        } else if constexpr (UdpEndpointLike<T>) {
-            // UDP Endpoint: create UdpTransport, open connection, adapt
-            auto udp = std::make_shared<modern::net::UdpTransport>();
-            if (ep_or_transport.bind_local)
-            {
-                // Server mode: bind to local port
-                udp->open_bind(std::forward<EndpointOrTransport>(ep_or_transport));
-            }
-            else
-            {
-                // Client mode: connect to destination
-                udp->open_connect(std::forward<EndpointOrTransport>(ep_or_transport));
-            }
-            auto src  = DatagramSource<modern::net::UdpTransport>(udp);
-            auto sink = DatagramSink<modern::net::UdpTransport>(udp);
-            using DuplexType = DuplexDatagramStream<decltype(src), decltype(sink)>;
-            auto duplex = std::make_shared<DuplexType>(std::move(src), std::move(sink));
-            return SharedStream<DuplexType>(duplex);
-        } else if constexpr (std::is_pointer_v<T> ||
-                             std::is_same_v<T, std::shared_ptr<std::decay_t<decltype(*ep_or_transport)>>>)
-        {
-            // For shared_ptr<T> or T* (e.g. custom transport classes)
-            using U = std::remove_pointer_t<T>;
-            std::shared_ptr<U> ptr = std::is_pointer_v<T> ? std::shared_ptr<U>(ep_or_transport) : ep_or_transport;
-            auto src  = TransportSource<U>(ptr);
-            auto sink = TransportSink<U>(ptr);
-            using DuplexType = TcpDuplexStream<decltype(src), decltype(sink)>;
-            auto duplex = std::make_shared<DuplexType>(std::move(src), std::move(sink));
-            return SharedStream<DuplexType>(duplex);
-        } else {
-            // For arbitrary transport objects (by value/ref)
-            auto obj = std::make_shared<T>(std::forward<EndpointOrTransport>(ep_or_transport));
-            auto src  = TransportSource<T>(obj);
-            auto sink = TransportSink<T>(obj);
-            using DuplexType = TcpDuplexStream<decltype(src), decltype(sink)>;
-            auto duplex = std::make_shared<DuplexType>(std::move(src), std::move(sink));
-            return SharedStream<DuplexType>(duplex);
-        }
+        auto src = DatagramSource<modern::net::UdpTransport>(transport);
+        auto sink = DatagramSink<modern::net::UdpTransport>(transport);
+        using DuplexType = DuplexDatagramStream<decltype(src), decltype(sink)>;
+        return SharedStream<DuplexType>(std::make_shared<DuplexType>(std::move(src), std::move(sink)));
+    }
+
+    template<typename T>
+        requires net_io_concepts::Readable<std::remove_cvref_t<T>> &&
+                 net_io_concepts::Writable<std::remove_cvref_t<T>> &&
+                 (!std::is_lvalue_reference_v<T>)
+    auto as_stream(T&& transport)
+    {
+        using Transport = std::remove_cvref_t<T>;
+        return as_stream(std::make_shared<Transport>(std::forward<T>(transport)));
     }
 
     // --- Convenience StreamBuilder for TCP ---
@@ -997,7 +900,7 @@ export namespace modern::net::adapters {
     >
     void run_server_with_executor(
         Exec& executor,
-        StreamBuilder make_stream,
+        StreamBuilder stream_builder,
         Callback&& on_client,
         std::atomic<bool>& running,
         ServerArgs&&... server_args
@@ -1006,12 +909,12 @@ export namespace modern::net::adapters {
         auto server = std::make_shared<ServerType>(std::forward<ServerArgs>(server_args)...);
         server->start();
 
-        executor.execute([server, &executor, make_stream, on_client = std::forward<Callback>(on_client), &running]() mutable {
+        executor.execute([server, &executor, stream_builder, on_client = std::forward<Callback>(on_client), &running]() mutable {
             while (running) {
                 try {
                     auto accepted = server->accept();
                     auto client = std::make_shared<ClientType>(std::move(accepted));
-                    auto stream = make_stream(client, server);
+                    auto stream = stream_builder(client, server);
                     on_client(stream);
                 } catch (const std::exception& ex) {
                     std::cerr << "[net_io_adapters] Error accepting connection: " << ex.what() << std::endl;
@@ -1061,6 +964,12 @@ export namespace modern::net::adapters {
     }
 } // namespace modern::net::adapters
 
+export namespace modern::net {
+
+using adapters::as_stream;
+
+} // namespace modern::net
+
 export namespace net_io_adapters {
 
 using modern::net::adapters::DatagramSink;
@@ -1072,17 +981,15 @@ using modern::net::adapters::make_datagram_source;
 using modern::net::adapters::make_duplex_datagram_stream;
 using modern::net::adapters::make_sink;
 using modern::net::adapters::make_source;
-using modern::net::adapters::make_stream;
+using modern::net::adapters::as_stream;
 using modern::net::adapters::run_server_with_executor;
 using modern::net::adapters::run_tcp_server;
 using modern::net::adapters::SharedStream;
 using modern::net::adapters::TcpDuplexStream;
-using modern::net::adapters::TcpEndpointLike;
 using modern::net::adapters::tcp_stream_builder;
 using modern::net::adapters::ThreadExecutor;
 using modern::net::adapters::TransportSink;
 using modern::net::adapters::TransportSource;
-using modern::net::adapters::UdpEndpointLike;
 
 } // namespace net_io_adapters
 

@@ -253,11 +253,20 @@ public:
     int native_handle() const noexcept override { return socket_->native_handle(); }
 };
 
+[[nodiscard]] inline AsyncTcpStreamAdapter as_stream(std::shared_ptr<AsyncTcpSocket> socket) {
+    return AsyncTcpStreamAdapter(std::move(socket));
+}
+
+[[nodiscard]] inline AsyncUdpStreamAdapter as_stream(std::shared_ptr<AsyncUdpSocket> socket) {
+    return AsyncUdpStreamAdapter(std::move(socket));
+}
+
 } // namespace modern::net
 
 export namespace net_io {
 
 using modern::net::AsyncTcpStreamAdapter;
 using modern::net::AsyncUdpStreamAdapter;
+using modern::net::as_stream;
 
 } // namespace net_io

@@ -103,6 +103,7 @@ target_sources(modern_io
     FILE_SET cxx_modules TYPE CXX_MODULES FILES
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/modern_io.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/exceptions.cppm
+      ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/stream.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/concepts.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/connection_arena.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/file.cppm
@@ -264,6 +265,7 @@ target_sources(modern_all_canonical
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/modern_io.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/modern.io.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/exceptions.cppm
+      ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/stream.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/concepts.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/connection_arena.cppm
       ${CMAKE_CURRENT_SOURCE_DIR}/modules/io/file.cppm

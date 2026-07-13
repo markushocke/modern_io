@@ -1,7 +1,7 @@
 export module modern.io;
 
 export import modern_io.exceptions;
-export import modern_io.concepts;
+export import modern_io.stream;
 export import modern_io.connection_arena;
 export import modern.trace;
 export import modern_io.file;

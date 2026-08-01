@@ -11,6 +11,7 @@ module;
 #include <expected>
 #include <cassert>
 #include <thread>
+#include <stop_token>
 
 #ifdef _WIN32
   #include <winsock2.h>
@@ -66,6 +67,9 @@ public:
 
     // Async accept: returns IoTask with a shared_ptr<AsyncTcpSocket>
     IoTask<std::expected<std::shared_ptr<AsyncTcpSocket>, std::error_code>> accept();
+    IoTask<std::expected<std::shared_ptr<AsyncTcpSocket>, std::error_code>> accept(
+        modern::scheduler completion_scheduler,
+        std::stop_token token);
 
 private:
     static std::error_code last_socket_error();

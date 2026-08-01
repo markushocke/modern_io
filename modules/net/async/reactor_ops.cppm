@@ -10,6 +10,7 @@ module;
 #include <sstream>
 #include <future>
 #include <type_traits>
+#include <stop_token>
 
 export module net_io.async_utils;
 
@@ -19,6 +20,54 @@ import net_io.event_loop;
 export import net_io.task;
 
 export namespace modern::net {
+
+    class IoWaitAwaiter {
+    public:
+        IoWaitAwaiter(
+            EventReactor& reactor, int fd, IOEvent events,
+            modern::scheduler completion_scheduler, std::stop_token token)
+            : reactor_(&reactor), fd_(fd), events_(events),
+              completion_scheduler_(std::move(completion_scheduler)), token_(token),
+              state_(std::make_shared<IoOperationState>()) {}
+
+        [[nodiscard]] bool await_ready() const noexcept { return false; }
+
+        void await_suspend(std::coroutine_handle<> handle) {
+            IoRegistration registration{
+                fd_, events_, handle, state_, completion_scheduler_, token_, state_};
+            (void)reactor_->register_io(registration);
+        }
+
+        [[nodiscard]] std::expected<void, std::error_code> await_resume() const noexcept {
+            switch (state_->completion()) {
+            case IoCompletion::ready:
+                return {};
+            case IoCompletion::cancelled:
+                return std::unexpected(std::make_error_code(std::errc::operation_canceled));
+            case IoCompletion::closed:
+                return std::unexpected(std::make_error_code(std::errc::bad_file_descriptor));
+            case IoCompletion::reactor_shutdown:
+                return std::unexpected(std::make_error_code(std::errc::operation_canceled));
+            case IoCompletion::pending:
+                return std::unexpected(std::make_error_code(std::errc::state_not_recoverable));
+            }
+            return std::unexpected(std::make_error_code(std::errc::io_error));
+        }
+
+    private:
+        EventReactor* reactor_;
+        int fd_;
+        IOEvent events_;
+        modern::scheduler completion_scheduler_;
+        std::stop_token token_;
+        std::shared_ptr<IoOperationState> state_;
+    };
+
+    [[nodiscard]] inline IoWaitAwaiter wait_io(
+        EventReactor& reactor, int fd, IOEvent events,
+        modern::scheduler completion_scheduler, std::stop_token token = {}) {
+        return {reactor, fd, events, std::move(completion_scheduler), token};
+    }
 
     // IoTask is the compatibility name for the public low-level Task type.
 
@@ -175,5 +224,6 @@ using modern::net::wrap_io_task_void;
 using modern::net::write_some_async;
 using modern::net::write_some_async_generic;
 using modern::net::write_some_async_on;
+using modern::net::wait_io;
 
 } // namespace net_io

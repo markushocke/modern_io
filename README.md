@@ -129,13 +129,12 @@ auto udp_stream = as_stream(udp);
 ```sh
 git clone https://github.com/markushocke/modern_io.git
 cd modern_io
-# Source builds resolve modern_trace automatically:
-# sibling ../modern_trace when present, otherwise GitHub fetch.
-# Override with -DMODERN_TRACE_PROVIDER=package|local|fetch
-# and -DMODERN_TRACE_ROOT=../modern_trace.
-# modern_runtime still defaults to GitHub fetch.
-# Alternatives: -DMODERN_RUNTIME_PROVIDER=local -DMODERN_RUNTIME_ROOT=../modern_runtime
-# or -DMODERN_RUNTIME_PROVIDER=package
+# Source builds resolve modern_trace and modern_runtime automatically:
+# use sibling repositories when present, otherwise fetch main from GitHub
+# into build/_deps. Override with
+# -DMODERN_TRACE_PROVIDER=auto|package|local|fetch and
+# -DMODERN_RUNTIME_PROVIDER=auto|package|local|fetch. Custom local checkouts can
+# be selected with -DMODERN_TRACE_ROOT=... and -DMODERN_RUNTIME_ROOT=....
 cmake -B build -G Ninja -DCMAKE_CXX_COMPILER=clang++
 cmake --build build
 ```

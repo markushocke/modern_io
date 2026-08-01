@@ -40,7 +40,6 @@ if(NOT _modern_io_find_async EQUAL -1 OR NOT _modern_io_find_canonical EQUAL -1)
       DEFAULT_PROVIDER "package"
       FETCH_REPOSITORY "@MODERN_RUNTIME_GIT_REPOSITORY@"
       FETCH_TAG "@MODERN_RUNTIME_GIT_TAG@"
-      BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/modern_runtime"
     )
   endif()
 endif()

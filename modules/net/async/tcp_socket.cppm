@@ -7,6 +7,8 @@ module;
 #include <memory>
 #include <cstring>
 #include <sstream>
+#include <optional>
+#include <stop_token>
 
 #ifdef _WIN32
   #define NOMINMAX
@@ -27,6 +29,9 @@ import net_io_base;
 import net_io.generic_awaiter;
 import net_io.event_loop;
 import net_io.async_utils;
+import net_io.task;
+import modern.exec;
+import net_io.tcp_endpoint;
 
 namespace modern::net {
 
@@ -87,6 +92,8 @@ public:
     [[nodiscard]] modern_io::ConnectionArena& connection_arena() noexcept { return *arena_; }
     [[nodiscard]] const modern_io::ConnectionArena& connection_arena() const noexcept { return *arena_; }
     [[nodiscard]] std::shared_ptr<modern_io::ConnectionArena> connection_arena_handle() const noexcept { return arena_; }
+    [[nodiscard]] const std::optional<TcpEndpoint>& peer_endpoint() const noexcept { return peer_endpoint_; }
+    void set_peer_endpoint(TcpEndpoint peer) { peer_endpoint_ = std::move(peer); }
 
     [[nodiscard]] auto async_read(std::span<char> buf) {
         return read_some_async_on(
@@ -171,10 +178,53 @@ public:
 
         return ConnectAwaiter{ this, fd_, addr, len };
     }
+
+    [[nodiscard]] IoTask<std::expected<void, std::error_code>> async_connect(
+        const sockaddr_storage& addr,
+        socklen_t len,
+        modern::scheduler completion_scheduler,
+        std::stop_token token) {
+        if (token.stop_requested())
+            co_return std::unexpected(std::make_error_code(std::errc::operation_canceled));
+        if (fd_ == invalid_socket && !ensure_socket(addr.ss_family))
+            co_return std::unexpected(std::make_error_code(std::errc::not_enough_memory));
+
+        const auto result = ::connect(
+            fd_, reinterpret_cast<const sockaddr*>(&addr), len);
+        if (result != 0) {
+#ifdef _WIN32
+            const auto error = WSAGetLastError();
+            if (error != WSAEWOULDBLOCK && error != WSAEINPROGRESS)
+                co_return std::unexpected(std::error_code(error, std::system_category()));
+#else
+            const auto error = errno;
+            if (error != EINPROGRESS && error != EAGAIN && error != EWOULDBLOCK)
+                co_return std::unexpected(std::error_code(error, std::system_category()));
+#endif
+            auto ready = co_await wait_io(
+                *loop_, fd_, IOEvent::Write, completion_scheduler, token);
+            if (!ready) co_return std::unexpected(ready.error());
+        }
+
+        int socket_error = 0;
+        socklen_t error_size = sizeof(socket_error);
+#ifdef _WIN32
+        if (::getsockopt(fd_, SOL_SOCKET, SO_ERROR,
+                reinterpret_cast<char*>(&socket_error), &error_size) < 0)
+            socket_error = WSAGetLastError();
+#else
+        if (::getsockopt(fd_, SOL_SOCKET, SO_ERROR, &socket_error, &error_size) < 0)
+            socket_error = errno;
+#endif
+        if (socket_error != 0)
+            co_return std::unexpected(std::error_code(socket_error, std::system_category()));
+        co_return std::expected<void, std::error_code> {};
+    }
 private:
     sock_t fd_;
     EventReactor* loop_;
     std::shared_ptr<modern_io::ConnectionArena> arena_;
+    std::optional<TcpEndpoint> peer_endpoint_;
 };
 } // namespace modern::net
 

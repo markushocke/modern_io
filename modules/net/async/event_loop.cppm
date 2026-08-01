@@ -37,8 +37,16 @@ struct FdWaiters {
     // Store coroutine handle + strong ownership token. Keeping a strong
     // reference ensures the awaiter object remains alive until we resume it,
     // which prevents races where handles point at destroyed coroutine frames.
-    std::deque<std::pair<std::coroutine_handle<>, std::shared_ptr<void>>> readers;
-    std::deque<std::pair<std::coroutine_handle<>, std::shared_ptr<void>>> writers;
+    struct waiter {
+        IoRegistrationToken token{};
+        std::coroutine_handle<> handle{};
+        std::shared_ptr<void> owner{};
+        modern::scheduler completion_scheduler{};
+        std::shared_ptr<IoOperationState> operation_state{};
+        std::shared_ptr<void> cancellation_callback{};
+    };
+    std::deque<waiter> readers;
+    std::deque<waiter> writers;
         uint32_t current_mask{0}; // epoll registration mask
 };
 
@@ -62,17 +70,25 @@ public:
     static void debug_log(const std::string &s);
 
     // Register read interest for fd
-    void register_read(int fd, std::coroutine_handle<> h, std::shared_ptr<void> owner = {});
+    [[nodiscard]] IoRegistrationToken register_read(
+        int fd, std::coroutine_handle<> h, std::shared_ptr<void> owner = {},
+        modern::scheduler completion_scheduler = {}, IoRegistrationToken token = {},
+        std::shared_ptr<IoOperationState> operation_state = {});
 
     // Register write interest for fd
-    void register_write(int fd, std::coroutine_handle<> h, std::shared_ptr<void> owner = {});
+    [[nodiscard]] IoRegistrationToken register_write(
+        int fd, std::coroutine_handle<> h, std::shared_ptr<void> owner = {},
+        modern::scheduler completion_scheduler = {}, IoRegistrationToken token = {},
+        std::shared_ptr<IoOperationState> operation_state = {});
 
-    void register_io(const IoRegistration& registration) override;
+    [[nodiscard]] IoRegistrationToken register_io(const IoRegistration& registration) override;
 
     template<NativeIoHandle T>
-    void register_io(T& io_device, IOEvent events, std::coroutine_handle<> resume_handle, std::shared_ptr<void> owner = {}) {
-        register_io(make_io_registration(io_device, events, resume_handle, std::move(owner)));
+    [[nodiscard]] IoRegistrationToken register_io(T& io_device, IOEvent events, std::coroutine_handle<> resume_handle, std::shared_ptr<void> owner = {}) {
+        return register_io(make_io_registration(io_device, events, resume_handle, std::move(owner)));
     }
+
+    void deregister(IoRegistrationToken token) override;
 
     // Remove all registrations for fd
     void deregister(int fd) override;
@@ -97,6 +113,10 @@ private:
 
     void dispatch_fd(int fd, uint32_t revents);
 
+    void cancel_registration(IoRegistrationToken token);
+    void enqueue_cancellation(IoRegistrationToken token);
+    void process_cancellations();
+
     void finish_all();
 
     void update_epoll_locked(int fd, uint32_t add_flags, std::unique_lock<std::mutex>& lk);
@@ -113,6 +133,9 @@ private:
 #endif
     std::thread worker_;
     std::atomic<bool> wake_pending_{false};
+    std::atomic<std::uint64_t> next_registration_{1};
+    std::mutex cancellation_mtx_;
+    std::vector<IoRegistrationToken> pending_cancellations_;
 };
 
 // Compatibility default reactor used by legacy convenience overloads.

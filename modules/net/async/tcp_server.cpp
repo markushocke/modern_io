@@ -7,6 +7,8 @@ module;
 #include <coroutine>
 #include <expected>
 #include <sstream>
+#include <array>
+#include <stop_token>
 
 #ifdef _WIN32
   #include <winsock2.h>
@@ -27,6 +29,7 @@ import net_io.tcp_endpoint;
 import net_io.async_tcp_socket;
 import net_io.event_loop;
 import net_io.async_utils;
+import modern.task_environment;
 
 namespace modern::net {
 
@@ -78,6 +81,14 @@ void AsyncTcpServer::stop() {
 }
 
 IoTask<std::expected<std::shared_ptr<AsyncTcpSocket>, std::error_code>> AsyncTcpServer::accept() {
+    auto completion_scheduler = co_await modern::this_task::scheduler();
+    auto token = co_await modern::this_task::stop_token();
+    co_return co_await accept(completion_scheduler, token);
+}
+
+IoTask<std::expected<std::shared_ptr<AsyncTcpSocket>, std::error_code>> AsyncTcpServer::accept(
+    modern::scheduler completion_scheduler,
+    std::stop_token token) {
     if (loop_->is_debug_enabled()) {
         std::ostringstream oss;
         oss << "[AsyncTcpServer] accept call this=" << this << " fd=" << fd_ << " listening=" << listening_;
@@ -97,83 +108,57 @@ IoTask<std::expected<std::shared_ptr<AsyncTcpSocket>, std::error_code>> AsyncTcp
         co_return std::unexpected(std::make_error_code(std::errc::bad_file_descriptor));
     }
 
-    auto accepted = co_await make_awaiter(
-        fd_,
-        [this](sock_t&) -> std::expected<sock_t, std::error_code> {
+    for (;;) {
+        if (token.stop_requested())
+            co_return std::unexpected(std::make_error_code(std::errc::operation_canceled));
+
             sockaddr_storage peer{};
             socklen_t sl = sizeof(peer);
-
 #ifdef _WIN32
             sock_t client = ::accept(fd_, reinterpret_cast<sockaddr*>(&peer), &sl);
             if (client != INVALID_SOCKET) {
-                if (loop_->is_debug_enabled()) {
-                    std::ostringstream oss;
-                    oss << "[AsyncTcpServer] accept immediate success fd=" << client;
-                    EventLoop::debug_log(oss.str());
-                }
-                return client;
+                set_socket_option(client, SocketOption::NonBlocking, 1);
             }
-
-            int err = WSAGetLastError();
-            if (err == WSAEWOULDBLOCK || err == WSAEINPROGRESS) {
-                return std::unexpected(std::make_error_code(std::errc::resource_unavailable_try_again));
-            }
-            return std::unexpected(std::error_code(err, std::system_category()));
+            int accept_error = client == INVALID_SOCKET ? WSAGetLastError() : 0;
 #else
-            while (true) {
-                sock_t client = ::accept4(fd_, reinterpret_cast<sockaddr*>(&peer), &sl, SOCK_NONBLOCK);
-                if (client >= 0) {
-                    if (loop_->is_debug_enabled()) {
-                        std::ostringstream oss;
-                        oss << "[AsyncTcpServer] accept immediate success fd=" << client;
-                        EventLoop::debug_log(oss.str());
-                    }
-                    return client;
-                }
-                if (errno == EINTR) {
-                    continue;
-                }
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    if (loop_->is_debug_enabled()) {
-                        EventLoop::debug_log("[AsyncTcpServer] accept would block");
-                    }
-                    return std::unexpected(std::make_error_code(std::errc::resource_unavailable_try_again));
-                }
-                if (loop_->is_debug_enabled()) {
-                    std::ostringstream oss;
-                    oss << "[AsyncTcpServer] accept error errno=" << errno;
-                    EventLoop::debug_log(oss.str());
-                }
-                return std::unexpected(std::error_code(errno, std::system_category()));
-            }
+            sock_t client;
+            do {
+                client = ::accept4(fd_, reinterpret_cast<sockaddr*>(&peer), &sl, SOCK_NONBLOCK);
+            } while (client < 0 && errno == EINTR);
+            int accept_error = client < 0 ? errno : 0;
 #endif
-        },
-        [this](sock_t& fd, std::coroutine_handle<> h, std::shared_ptr<void> owner) {
-            loop_->register_io(make_io_registration(fd, IOEvent::Read, h, std::move(owner)));
-        },
-        false
-    );
-
-    if (!accepted) {
-        if (loop_->is_debug_enabled()) {
-            std::ostringstream oss;
-            oss << "[AsyncTcpServer] accept completed with error=" << accepted.error().message();
-            EventLoop::debug_log(oss.str());
+        if (accept_error == 0) {
+#ifdef _WIN32
+            auto socket = std::make_shared<AsyncTcpSocket>(client, true, *loop_, accepted_socket_arena_settings_);
+#else
+            auto socket = std::make_shared<AsyncTcpSocket>(client, true, *loop_, accepted_socket_arena_settings_);
+#endif
+        std::array<char, NI_MAXHOST> host{};
+        std::array<char, NI_MAXSERV> service{};
+        if (::getnameinfo(
+              reinterpret_cast<const sockaddr*>(&peer), sl,
+              host.data(), static_cast<socklen_t>(host.size()),
+              service.data(), static_cast<socklen_t>(service.size()),
+              NI_NUMERICHOST | NI_NUMERICSERV) == 0) {
+            socket->set_peer_endpoint(TcpEndpoint{
+                host.data(), static_cast<std::uint16_t>(std::stoul(service.data()))});
         }
-        co_return std::unexpected(accepted.error());
-    }
-
-    if (loop_->is_debug_enabled()) {
-        std::ostringstream oss;
-        oss << "[AsyncTcpServer] accept completed fd=" << *accepted;
-        EventLoop::debug_log(oss.str());
-    }
+            co_return socket;
+        }
 
 #ifdef _WIN32
-    co_return std::make_shared<AsyncTcpSocket>(*accepted, false, *loop_, accepted_socket_arena_settings_);
+        const bool would_block = accept_error == WSAEWOULDBLOCK || accept_error == WSAEINPROGRESS;
 #else
-    co_return std::make_shared<AsyncTcpSocket>(*accepted, true, *loop_, accepted_socket_arena_settings_);
+        const bool would_block = accept_error == EAGAIN || accept_error == EWOULDBLOCK;
 #endif
+        if (!would_block)
+            co_return std::unexpected(std::error_code(accept_error, std::system_category()));
+
+        auto ready = co_await wait_io(
+            *loop_, fd_, IOEvent::Read, completion_scheduler, token);
+        if (!ready)
+            co_return std::unexpected(ready.error());
+    }
 }
 
 std::error_code AsyncTcpServer::last_socket_error() {

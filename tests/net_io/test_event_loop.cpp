@@ -1,6 +1,10 @@
 // test_event_loop.cpp
 import net_io_async;
+import modern.runtime;
 #include <coroutine>
+#include <expected>
+#include <atomic>
+#include <stop_token>
 #include <gtest/gtest.h>
 #include <thread>
 #include <chrono>
@@ -357,6 +361,85 @@ TEST(EventLoopTest, DeregisterPreventsResume) {
     close(r); close(w);
 
     EXPECT_FALSE(resumed);
+}
+
+TEST(EventLoopTest, RegistrationTokenRemovesOnlyItsWaiter) {
+    int fds[2];
+    ASSERT_EQ(pipe(fds), 0);
+    modern::net::EventLoop loop;
+    loop.start();
+
+    struct TokenAwaitable {
+        modern::net::EventLoop& loop;
+        int fd;
+        modern::net::IoRegistrationToken& token;
+        bool& resumed;
+        bool await_ready() noexcept { return false; }
+        void await_suspend(std::coroutine_handle<> handle) {
+            token = loop.register_io(make_io_registration(fd, modern::net::IOEvent::Read, handle));
+        }
+        void await_resume() noexcept { resumed = true; }
+    };
+
+    auto wait = [](modern::net::EventLoop& loop, int fd,
+                   modern::net::IoRegistrationToken& token, bool& resumed) -> SimpleTask {
+        co_await TokenAwaitable{loop, fd, token, resumed};
+    };
+
+    modern::net::IoRegistrationToken first_token;
+    modern::net::IoRegistrationToken second_token;
+    bool first_resumed = false;
+    bool second_resumed = false;
+    auto first = wait(loop, fds[0], first_token, first_resumed);
+    auto second = wait(loop, fds[0], second_token, second_resumed);
+    ASSERT_TRUE(static_cast<bool>(first_token));
+    ASSERT_TRUE(static_cast<bool>(second_token));
+    ASSERT_NE(first_token.value, second_token.value);
+
+    loop.deregister(first_token);
+    const char byte = 't';
+    ASSERT_EQ(write(fds[1], &byte, 1), 1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    loop.stop();
+
+    close(fds[0]);
+    close(fds[1]);
+    EXPECT_FALSE(first_resumed);
+    EXPECT_TRUE(second_resumed);
+}
+
+TEST(EventLoopTest, CancellationResumesOnInjectedSchedulerExactlyOnce) {
+    int fds[2];
+    ASSERT_EQ(pipe(fds), 0);
+    modern::net::EventLoop loop;
+    modern::thread_pool completion_pool{1};
+    std::stop_source stop;
+    std::atomic<int> resumes{0};
+    std::thread::id completion_thread;
+    loop.start();
+
+    auto operation = [&]() -> modern::task<std::expected<void, std::error_code>> {
+        auto result = co_await modern::net::wait_io(
+            loop, fds[0], modern::net::IOEvent::Read,
+            completion_pool.get_scheduler(), stop.get_token());
+        completion_thread = std::this_thread::get_id();
+        resumes.fetch_add(1, std::memory_order_relaxed);
+        co_return result;
+    };
+
+    auto pending = operation();
+    stop.request_stop();
+    auto result = pending.get();
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error(), std::make_error_code(std::errc::operation_canceled));
+    EXPECT_EQ(resumes.load(std::memory_order_relaxed), 1);
+    EXPECT_NE(completion_thread, std::this_thread::get_id());
+
+    loop.stop();
+    completion_pool.shutdown();
+    completion_pool.join();
+    close(fds[0]);
+    close(fds[1]);
 }
 
 // stop() should cause finish_all() to resume pending readers and writers.

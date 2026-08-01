@@ -31,6 +31,11 @@ function(modern_io_resolve_trace_target out_target)
     set(MODERN_TRACE_PROVIDER "${MODERN_TRACE_RESOLVE_DEFAULT_PROVIDER}")
   endif()
 
+  if((NOT DEFINED MODERN_TRACE_ROOT OR MODERN_TRACE_ROOT STREQUAL "")
+      AND NOT MODERN_TRACE_RESOLVE_LOCAL_ROOT STREQUAL "")
+    set(MODERN_TRACE_ROOT "${MODERN_TRACE_RESOLVE_LOCAL_ROOT}")
+  endif()
+
   set(_modern_trace_provider "${MODERN_TRACE_PROVIDER}")
   if(_modern_trace_provider STREQUAL "auto")
     if(DEFINED MODERN_TRACE_ROOT AND NOT MODERN_TRACE_ROOT STREQUAL "" AND EXISTS "${MODERN_TRACE_ROOT}/CMakeLists.txt")
@@ -38,11 +43,6 @@ function(modern_io_resolve_trace_target out_target)
     else()
       set(_modern_trace_provider "fetch")
     endif()
-  endif()
-
-  if((NOT DEFINED MODERN_TRACE_ROOT OR MODERN_TRACE_ROOT STREQUAL "")
-      AND NOT MODERN_TRACE_RESOLVE_LOCAL_ROOT STREQUAL "")
-    set(MODERN_TRACE_ROOT "${MODERN_TRACE_RESOLVE_LOCAL_ROOT}")
   endif()
 
   if((NOT DEFINED MODERN_TRACE_GIT_REPOSITORY OR MODERN_TRACE_GIT_REPOSITORY STREQUAL "")
@@ -83,7 +83,7 @@ function(modern_io_resolve_trace_target out_target)
     endif()
 
     if(NOT DEFINED MODERN_TRACE_BINARY_DIR OR MODERN_TRACE_BINARY_DIR STREQUAL "")
-      set(MODERN_TRACE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/modern_trace")
+      set(MODERN_TRACE_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/_deps/modern_trace-build")
     endif()
 
     if(NOT TARGET modern_trace AND NOT TARGET modern_trace::modern_trace)

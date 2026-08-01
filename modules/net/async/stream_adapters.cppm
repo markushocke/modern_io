@@ -6,6 +6,7 @@ module;
 #include <system_error>
 #include <functional>
 #include <coroutine>
+#include <stop_token>
 #include <iostream>
 
 #ifdef _WIN32
@@ -30,6 +31,7 @@ import net_io_base;
 import net_io.generic_awaiter;
 import net_io.async_utils;
 import net_io.task; // Task / IoTask alias
+import modern.task_environment;
 
 export namespace modern::net
 {
@@ -77,14 +79,28 @@ public:
     // Implement AsyncStreamBase by delegating to low-level read_some/write_some via async_utils
     [[nodiscard]] IoTask<std::expected<std::size_t, std::error_code>>
     read_async(std::span<char> buf) override {
-        auto fd = socket_->native_handle();
-        auto start = [fd, &loop = socket_->event_loop(), owner = std::make_shared<int>(0)](std::coroutine_handle<> h) {
-            loop.register_io(make_io_registration(fd, IOEvent::Read, h, owner));
-        };
-        auto finish = [socket = socket_, buf]() -> std::expected<std::size_t, std::error_code> {
-            return socket->read_some(buf);
-        };
-        co_return co_await make_awaitable_with_hooks<std::expected<std::size_t, std::error_code>>(std::move(start), std::move(finish));
+        auto completion_scheduler = co_await modern::this_task::scheduler();
+        auto token = co_await modern::this_task::stop_token();
+        co_return co_await read_async(buf, completion_scheduler, token);
+    }
+
+    [[nodiscard]] IoTask<std::expected<std::size_t, std::error_code>>
+    read_async(
+        std::span<char> buf,
+        modern::scheduler completion_scheduler,
+        std::stop_token token) {
+        for (;;) {
+            if (token.stop_requested())
+                co_return std::unexpected(std::make_error_code(std::errc::operation_canceled));
+            auto result = socket_->read_some(buf);
+            if (result || !is_would_block(result.error()))
+                co_return result;
+            auto ready = co_await wait_io(
+                socket_->event_loop(), socket_->native_handle(), IOEvent::Read,
+                completion_scheduler, token);
+            if (!ready)
+                co_return std::unexpected(ready.error());
+        }
     }
 
     // Pointer/size overload to satisfy AsyncInputStream concept
@@ -100,14 +116,28 @@ public:
 
     [[nodiscard]] IoTask<std::expected<std::size_t, std::error_code>>
     write_async(std::span<const char> buf) override {
-        auto fd = socket_->native_handle();
-        auto start = [fd, &loop = socket_->event_loop(), owner = std::make_shared<int>(0)](std::coroutine_handle<> h) {
-            loop.register_io(make_io_registration(fd, IOEvent::Write, h, owner));
-        };
-        auto finish = [socket = socket_, buf]() -> std::expected<std::size_t, std::error_code> {
-            return socket->write_some(buf);
-        };
-        co_return co_await make_awaitable_with_hooks<std::expected<std::size_t, std::error_code>>(std::move(start), std::move(finish));
+        auto completion_scheduler = co_await modern::this_task::scheduler();
+        auto token = co_await modern::this_task::stop_token();
+        co_return co_await write_async(buf, completion_scheduler, token);
+    }
+
+    [[nodiscard]] IoTask<std::expected<std::size_t, std::error_code>>
+    write_async(
+        std::span<const char> buf,
+        modern::scheduler completion_scheduler,
+        std::stop_token token) {
+        for (;;) {
+            if (token.stop_requested())
+                co_return std::unexpected(std::make_error_code(std::errc::operation_canceled));
+            auto result = socket_->write_some(buf);
+            if (result || !is_would_block(result.error()))
+                co_return result;
+            auto ready = co_await wait_io(
+                socket_->event_loop(), socket_->native_handle(), IOEvent::Write,
+                completion_scheduler, token);
+            if (!ready)
+                co_return std::unexpected(ready.error());
+        }
     }
 
     // Pointer/size overload to satisfy AsyncOutputStream concept

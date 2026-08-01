@@ -10,9 +10,13 @@ module;
 #include <expected>
 #include <system_error>
 #include <coroutine>
+#include <atomic>
+#include <stop_token>
 #endif
 
 export module net_io.async_concepts;
+
+export import modern.exec;
 
 #ifdef _MSC_VER
 import <concepts>;
@@ -182,17 +186,49 @@ export namespace modern::net
   using NativeIoHandleType = int;
 #endif
 
+  struct IoRegistrationToken {
+      std::uint64_t value{};
+      [[nodiscard]] explicit constexpr operator bool() const noexcept { return value != 0; }
+      friend constexpr bool operator==(IoRegistrationToken, IoRegistrationToken) noexcept = default;
+  };
+
+  enum class IoCompletion : std::uint8_t {
+      pending,
+      ready,
+      cancelled,
+      closed,
+      reactor_shutdown
+  };
+
+  class IoOperationState {
+  public:
+      [[nodiscard]] bool complete(IoCompletion desired) noexcept {
+          auto expected = IoCompletion::pending;
+          return completion_.compare_exchange_strong(
+              expected, desired, std::memory_order_acq_rel, std::memory_order_acquire);
+      }
+      [[nodiscard]] IoCompletion completion() const noexcept {
+          return completion_.load(std::memory_order_acquire);
+      }
+  private:
+      std::atomic<IoCompletion> completion_{IoCompletion::pending};
+  };
+
   struct IoRegistration {
       NativeIoHandleType handle{};
       IOEvent events{IOEvent::None};
       std::coroutine_handle<> resume_handle{};
       std::shared_ptr<void> owner{};
+      modern::scheduler completion_scheduler{};
+      std::stop_token stop_token{};
+      std::shared_ptr<IoOperationState> operation_state{};
   };
 
     class EventReactor {
     public:
       virtual ~EventReactor() = default;
-      virtual void register_io(const IoRegistration& registration) = 0;
+      [[nodiscard]] virtual IoRegistrationToken register_io(const IoRegistration& registration) = 0;
+      virtual void deregister(IoRegistrationToken token) = 0;
       virtual void deregister(int fd) = 0;
       [[nodiscard]] virtual bool is_debug_enabled() const noexcept { return false; }
     };
@@ -213,7 +249,10 @@ export namespace modern::net
         static_cast<NativeIoHandleType>(handle),
         events,
         resume_handle,
-        std::move(owner)
+        std::move(owner),
+        {},
+        {},
+        {}
       };
     }
 
@@ -236,7 +275,8 @@ export namespace modern::net
 
   template<typename T>
   concept EventReactorLike = requires(T& reactor, const IoRegistration& registration, int fd) {
-      { reactor.register_io(registration) } -> std::same_as<void>;
+      { reactor.register_io(registration) } -> std::same_as<IoRegistrationToken>;
+      reactor.deregister(IoRegistrationToken{});
       { reactor.deregister(fd) } -> std::same_as<void>;
   };
 } // namespace modern::net
@@ -248,6 +288,9 @@ using modern::net::EventReactor;
 using modern::net::has_event;
 using modern::net::IOEvent;
 using modern::net::IoRegistration;
+using modern::net::IoRegistrationToken;
+using modern::net::IoCompletion;
+using modern::net::IoOperationState;
 using modern::net::make_io_registration;
 
 template<typename T>

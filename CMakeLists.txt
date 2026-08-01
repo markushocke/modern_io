@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.28)
 project(IOProject VERSION 0.1.0 LANGUAGES CXX)
 
+option(MODERN_IO_BUILD_TESTS "Build modern_io tests" ${PROJECT_IS_TOP_LEVEL})
+
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
@@ -10,7 +12,6 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/modern_trace_provider.cmake)
 set(MODERN_IO_PACKAGE_NAME modern_io)
 set(MODERN_IO_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/${MODERN_IO_PACKAGE_NAME}")
 set(MODERN_IO_PACKAGE_VERSION "${PROJECT_VERSION}")
-set(MODERN_IO_DEPENDENCIES_DIR "${CMAKE_CURRENT_BINARY_DIR}/dependencies" CACHE PATH "Directory for dependency git checkouts")
 
 # ----------------------------
 # 1) General C++23 settings
@@ -46,18 +47,20 @@ endif()
 # Always explicitly find/link threads
 find_package(Threads REQUIRED)
 
-set(MODERN_RUNTIME_PROVIDER "fetch" CACHE STRING "How to resolve modern_runtime: package, local, or fetch")
-set_property(CACHE MODERN_RUNTIME_PROVIDER PROPERTY STRINGS package local fetch)
-set(MODERN_RUNTIME_ROOT "${MODERN_IO_DEPENDENCIES_DIR}/modern_runtime" CACHE PATH "Path to a local modern_runtime checkout")
-set(MODERN_RUNTIME_SOURCE_DIR "${MODERN_IO_DEPENDENCIES_DIR}/modern_runtime" CACHE PATH "FetchContent source checkout directory for modern_runtime")
+get_filename_component(MODERN_IO_SIBLING_DIR "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+
+set(MODERN_RUNTIME_PROVIDER "auto" CACHE STRING "How to resolve modern_runtime: auto, package, local, or fetch")
+set_property(CACHE MODERN_RUNTIME_PROVIDER PROPERTY STRINGS auto package local fetch)
+set(MODERN_RUNTIME_ROOT "${MODERN_IO_SIBLING_DIR}/modern_runtime" CACHE PATH "Path to an optional local modern_runtime checkout")
+set(MODERN_RUNTIME_SOURCE_DIR "" CACHE PATH "Optional FetchContent source directory for modern_runtime (defaults to build/_deps)")
 set(MODERN_RUNTIME_GIT_REPOSITORY "https://github.com/markushocke/modern_runtime.git" CACHE STRING "Git repository used when MODERN_RUNTIME_PROVIDER=fetch")
-set(MODERN_RUNTIME_GIT_TAG "main" CACHE STRING "Git tag or branch used when MODERN_RUNTIME_PROVIDER=fetch")
-set(MODERN_TRACE_PROVIDER "fetch" CACHE STRING "How to resolve modern_trace: auto, package, local, or fetch")
+set(MODERN_RUNTIME_GIT_TAG "main" CACHE STRING "Git branch or tag used when MODERN_RUNTIME_PROVIDER=fetch")
+set(MODERN_TRACE_PROVIDER "auto" CACHE STRING "How to resolve modern_trace: auto, package, local, or fetch")
 set_property(CACHE MODERN_TRACE_PROVIDER PROPERTY STRINGS auto package local fetch)
-set(MODERN_TRACE_ROOT "${MODERN_IO_DEPENDENCIES_DIR}/modern_trace" CACHE PATH "Path to a local modern_trace checkout")
-set(MODERN_TRACE_SOURCE_DIR "${MODERN_IO_DEPENDENCIES_DIR}/modern_trace" CACHE PATH "FetchContent source checkout directory for modern_trace")
+set(MODERN_TRACE_ROOT "${MODERN_IO_SIBLING_DIR}/modern_trace" CACHE PATH "Path to an optional local modern_trace checkout")
+set(MODERN_TRACE_SOURCE_DIR "" CACHE PATH "Optional FetchContent source directory for modern_trace (defaults to build/_deps)")
 set(MODERN_TRACE_GIT_REPOSITORY "https://github.com/markushocke/modern_trace.git" CACHE STRING "Git repository used when MODERN_TRACE_PROVIDER=fetch")
-set(MODERN_TRACE_GIT_TAG "main" CACHE STRING "Git tag or branch used when MODERN_TRACE_PROVIDER=fetch")
+set(MODERN_TRACE_GIT_TAG "main" CACHE STRING "Git branch or tag used when MODERN_TRACE_PROVIDER=fetch")
 
 modern_io_resolve_trace_target(
   MODERN_TRACE_TARGET
@@ -66,17 +69,15 @@ modern_io_resolve_trace_target(
   FETCH_REPOSITORY "${MODERN_TRACE_GIT_REPOSITORY}"
   FETCH_TAG "${MODERN_TRACE_GIT_TAG}"
   SOURCE_DIR "${MODERN_TRACE_SOURCE_DIR}"
-  BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/modern_trace"
 )
 
 modern_io_resolve_runtime_target(
   MODERN_RUNTIME_TARGET
-  DEFAULT_PROVIDER "fetch"
+  DEFAULT_PROVIDER "auto"
   LOCAL_ROOT "${MODERN_RUNTIME_ROOT}"
   FETCH_REPOSITORY "${MODERN_RUNTIME_GIT_REPOSITORY}"
   FETCH_TAG "${MODERN_RUNTIME_GIT_TAG}"
   SOURCE_DIR "${MODERN_RUNTIME_SOURCE_DIR}"
-  BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/modern_runtime"
 )
 
 set(MODERN_RUNTIME_INSTALL_TARGET modern_runtime::modern_runtime)
@@ -421,35 +422,23 @@ install(
 # ----------------------------
 # 11) Google Test Integration
 # ----------------------------
-include(FetchContent)
-FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG        v1.14.0
-)
-# For Windows: Prevent overriding the parent project's compiler/linker settings
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
+if(MODERN_IO_BUILD_TESTS)
+  include(FetchContent)
+  FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG        v1.14.0
+  )
+  # For Windows: Prevent overriding the parent project's compiler/linker settings
+  set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+  set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(googletest)
 
-enable_testing()
-include(GoogleTest)
+  enable_testing()
+  include(GoogleTest)
 
-# Create a minimal DartConfiguration.tcl in the build dir so ctest/CTest
-# won't print "Cannot find file: ${CMAKE_BINARY_DIR}/DartConfiguration.tcl".
-# This file is normally used by CDash; for local builds a minimal file is
-# sufficient and avoids noisy messages from some CTest versions.
-set(DART_CONFIG_IN "${CMAKE_CURRENT_SOURCE_DIR}/cmake/DartConfiguration.tcl.in")
-set(DART_CONFIG_OUT "${CMAKE_BINARY_DIR}/DartConfiguration.tcl")
-if(NOT EXISTS ${DART_CONFIG_IN})
-  # If the template doesn't exist in source, create a minimal template at
-  # configure time inside the binary dir. This avoids requiring changes to
-  # the source tree for local developers.
-  file(WRITE "${DART_CONFIG_IN}" "# Minimal DartConfiguration.tcl for local builds\nset(CTEST_SITE_NAME \"Local\")\n")
+  # ----------------------------
+  # 12) Test Targets
+  # ----------------------------
+  add_subdirectory(tests)
 endif()
-configure_file(${DART_CONFIG_IN} ${DART_CONFIG_OUT} COPYONLY)
-
-# ----------------------------
-# 12) Test Targets
-# ----------------------------
-add_subdirectory(tests)

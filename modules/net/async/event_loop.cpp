@@ -1,11 +1,13 @@
 module;
 
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <coroutine>
 #include <cstdio>
 #include <cstdlib>
 #include <deque>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -32,6 +34,25 @@ module net_io.event_loop;
 import net_io.async_concepts;
 
 namespace modern::net {
+
+namespace {
+void resume_waiter(FdWaiters::waiter waiter, IoCompletion completion) noexcept {
+    if (waiter.operation_state && !waiter.operation_state->complete(completion))
+        return;
+    auto resume = [waiter = std::move(waiter)]() mutable noexcept {
+        if (waiter.handle && !waiter.handle.done()) {
+            try { waiter.handle.resume(); } catch (...) {}
+        }
+    };
+    if (waiter.completion_scheduler.valid()) {
+        try {
+            waiter.completion_scheduler.execute(std::move(resume));
+            return;
+        } catch (...) {}
+    }
+    resume();
+}
+}
 
 EventLoop& EventLoop::instance() {
     static EventLoop loop;
@@ -89,79 +110,195 @@ void EventLoop::debug_log(const std::string& message) {
     std::cerr.flush();
 }
 
-void EventLoop::register_read(int fd, std::coroutine_handle<> h, std::shared_ptr<void> owner) {
+IoRegistrationToken EventLoop::register_read(
+    int fd, std::coroutine_handle<> h, std::shared_ptr<void> owner,
+    modern::scheduler completion_scheduler, IoRegistrationToken token,
+    std::shared_ptr<IoOperationState> operation_state) {
+    if (!token)
+        token.value = next_registration_.fetch_add(1, std::memory_order_relaxed);
     if (fd < 0) {
-        if (h && !h.done()) {
-            h.resume();
-        }
-        return;
+        resume_waiter({token, h, std::move(owner), std::move(completion_scheduler), std::move(operation_state), {}}, IoCompletion::closed);
+        return token;
     }
     std::unique_lock<std::mutex> lock(mtx_);
     auto& waiters = waiters_[fd];
 
     if (h && !h.done()) {
         for (auto& reader : waiters.readers) {
-            if (reader.first.address() == h.address()) {
+            if (reader.handle.address() == h.address()) {
                 if (owner) {
-                    reader.second = owner;
+                    reader.owner = owner;
                 }
-                return;
+                return reader.token;
             }
         }
-        waiters.readers.emplace_back(h, owner);
+        waiters.readers.push_back({token, h, std::move(owner), std::move(completion_scheduler), std::move(operation_state), {}});
     }
 
 #ifndef _WIN32
     update_epoll_locked(fd, EPOLLIN, lock);
 #endif
     wake();
+    return token;
 }
 
-void EventLoop::register_write(int fd, std::coroutine_handle<> h, std::shared_ptr<void> owner) {
+IoRegistrationToken EventLoop::register_write(
+    int fd, std::coroutine_handle<> h, std::shared_ptr<void> owner,
+    modern::scheduler completion_scheduler, IoRegistrationToken token,
+    std::shared_ptr<IoOperationState> operation_state) {
+    if (!token)
+        token.value = next_registration_.fetch_add(1, std::memory_order_relaxed);
     if (fd < 0) {
-        if (h && !h.done()) {
-            h.resume();
-        }
-        return;
+        resume_waiter({token, h, std::move(owner), std::move(completion_scheduler), std::move(operation_state), {}}, IoCompletion::closed);
+        return token;
     }
     std::unique_lock<std::mutex> lock(mtx_);
     auto& waiters = waiters_[fd];
 
     if (h && !h.done()) {
         for (auto& writer : waiters.writers) {
-            if (writer.first.address() == h.address()) {
+            if (writer.handle.address() == h.address()) {
                 if (owner) {
-                    writer.second = owner;
+                    writer.owner = owner;
                 }
-                return;
+                return writer.token;
             }
         }
-        waiters.writers.emplace_back(h, owner);
+        waiters.writers.push_back({token, h, std::move(owner), std::move(completion_scheduler), std::move(operation_state), {}});
     }
 
 #ifndef _WIN32
     update_epoll_locked(fd, EPOLLOUT, lock);
 #endif
     wake();
+    return token;
 }
 
-void EventLoop::register_io(const IoRegistration& registration) {
+IoRegistrationToken EventLoop::register_io(const IoRegistration& registration) {
+    IoRegistrationToken token{next_registration_.fetch_add(1, std::memory_order_relaxed)};
+    if (registration.stop_token.stop_requested()) {
+        resume_waiter(
+            {token, registration.resume_handle, registration.owner,
+             registration.completion_scheduler, registration.operation_state, {}},
+            IoCompletion::cancelled);
+        return token;
+    }
     if (has_event(registration.events, IOEvent::Read)
         || has_event(registration.events, IOEvent::Error)
         || has_event(registration.events, IOEvent::Hangup)) {
 #ifdef _WIN32
-        register_read(static_cast<int>(reinterpret_cast<std::uintptr_t>(registration.handle)), registration.resume_handle, registration.owner);
+        (void)register_read(static_cast<int>(reinterpret_cast<std::uintptr_t>(registration.handle)), registration.resume_handle, registration.owner, registration.completion_scheduler, token, registration.operation_state);
 #else
-        register_read(static_cast<int>(registration.handle), registration.resume_handle, registration.owner);
+        (void)register_read(static_cast<int>(registration.handle), registration.resume_handle, registration.owner, registration.completion_scheduler, token, registration.operation_state);
 #endif
     }
 
     if (has_event(registration.events, IOEvent::Write)) {
 #ifdef _WIN32
-        register_write(static_cast<int>(reinterpret_cast<std::uintptr_t>(registration.handle)), registration.resume_handle, registration.owner);
+        (void)register_write(static_cast<int>(reinterpret_cast<std::uintptr_t>(registration.handle)), registration.resume_handle, registration.owner, registration.completion_scheduler, token, registration.operation_state);
 #else
-        register_write(static_cast<int>(registration.handle), registration.resume_handle, registration.owner);
+        (void)register_write(static_cast<int>(registration.handle), registration.resume_handle, registration.owner, registration.completion_scheduler, token, registration.operation_state);
 #endif
+    }
+
+    if (registration.stop_token.stop_possible()) {
+        using callback_type = std::stop_callback<std::function<void()>>;
+        auto callback = std::make_shared<callback_type>(
+            registration.stop_token,
+            std::function<void()>{[this, token] { enqueue_cancellation(token); }});
+        std::scoped_lock lock(mtx_);
+        for (auto& [fd, waiters] : waiters_) {
+            for (auto& waiter : waiters.readers)
+                if (waiter.token == token) waiter.cancellation_callback = callback;
+            for (auto& waiter : waiters.writers)
+                if (waiter.token == token) waiter.cancellation_callback = callback;
+        }
+    }
+    return token;
+}
+
+void EventLoop::enqueue_cancellation(IoRegistrationToken token) {
+    {
+        std::scoped_lock lock(cancellation_mtx_);
+        pending_cancellations_.push_back(token);
+    }
+    wake();
+}
+
+void EventLoop::process_cancellations() {
+    std::vector<IoRegistrationToken> pending;
+    {
+        std::scoped_lock lock(cancellation_mtx_);
+        pending.swap(pending_cancellations_);
+    }
+    for (auto token : pending)
+        cancel_registration(token);
+}
+
+void EventLoop::cancel_registration(IoRegistrationToken token) {
+    std::vector<FdWaiters::waiter> cancelled;
+    {
+        std::scoped_lock lock(mtx_);
+        for (auto it = waiters_.begin(); it != waiters_.end();) {
+            auto& waiters = it->second;
+            auto collect = [&](auto& queue) {
+                for (auto entry = queue.begin(); entry != queue.end();) {
+                    if (entry->token == token) {
+                        cancelled.push_back(std::move(*entry));
+                        entry = queue.erase(entry);
+                    } else ++entry;
+                }
+            };
+            collect(waiters.readers);
+            collect(waiters.writers);
+#ifndef _WIN32
+            uint32_t new_mask = 0;
+            if (!waiters.readers.empty()) new_mask |= EPOLLIN;
+            if (!waiters.writers.empty()) new_mask |= EPOLLOUT;
+            if (new_mask == 0) {
+                ::epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, it->first, nullptr);
+                it = waiters_.erase(it);
+                continue;
+            }
+#endif
+            ++it;
+        }
+    }
+    for (auto& waiter : cancelled)
+        resume_waiter(std::move(waiter), IoCompletion::cancelled);
+}
+
+void EventLoop::deregister(IoRegistrationToken token) {
+    if (!token)
+        return;
+    std::scoped_lock lock(mtx_);
+    for (auto it = waiters_.begin(); it != waiters_.end();) {
+        auto& waiters = it->second;
+        std::erase_if(waiters.readers, [token](const auto& waiter) { return waiter.token == token; });
+        std::erase_if(waiters.writers, [token](const auto& waiter) { return waiter.token == token; });
+#ifndef _WIN32
+        uint32_t new_mask = 0;
+        if (!waiters.readers.empty()) new_mask |= EPOLLIN;
+        if (!waiters.writers.empty()) new_mask |= EPOLLOUT;
+        if (new_mask == 0) {
+            ::epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, it->first, nullptr);
+            it = waiters_.erase(it);
+            continue;
+        }
+        if (new_mask != waiters.current_mask) {
+            epoll_event ev{};
+            ev.events = new_mask;
+            ev.data.fd = it->first;
+            if (::epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, it->first, &ev) == 0)
+                waiters.current_mask = new_mask;
+        }
+#else
+        if (waiters.readers.empty() && waiters.writers.empty()) {
+            it = waiters_.erase(it);
+            continue;
+        }
+#endif
+        ++it;
     }
 }
 
@@ -169,11 +306,23 @@ void EventLoop::deregister(int fd) {
     if (fd < 0) {
         return;
     }
+    std::vector<FdWaiters::waiter> closed;
+    {
     std::scoped_lock lock(mtx_);
 #ifndef _WIN32
     ::epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr);
 #endif
-    waiters_.erase(fd);
+    auto found = waiters_.find(fd);
+    if (found != waiters_.end()) {
+        for (auto& waiter : found->second.readers)
+            if (waiter.operation_state) closed.push_back(std::move(waiter));
+        for (auto& waiter : found->second.writers)
+            if (waiter.operation_state) closed.push_back(std::move(waiter));
+        waiters_.erase(found);
+    }
+    }
+    for (auto& waiter : closed)
+        resume_waiter(std::move(waiter), IoCompletion::closed);
 }
 
 bool EventLoop::is_debug_enabled() const noexcept {
@@ -280,11 +429,11 @@ void EventLoop::drain_wake_fd() {
     }
     wake_pending_.store(false);
 #endif
+    process_cancellations();
 }
 
 void EventLoop::dispatch_fd(int fd, uint32_t revents) {
-    std::vector<std::coroutine_handle<>> to_resume;
-    std::vector<std::shared_ptr<void>> owners_keepalive;
+    std::vector<FdWaiters::waiter> to_resume;
     {
         std::scoped_lock lock(mtx_);
         auto it = waiters_.find(fd);
@@ -296,43 +445,37 @@ void EventLoop::dispatch_fd(int fd, uint32_t revents) {
             std::ostringstream oss;
             oss << "[EventLoop] dispatch_fd fd=" << fd << " events=" << revents << " readers=" << waiters.readers.size() << " writers=" << waiters.writers.size();
             oss << " reader_handles=[";
-            for (auto& reader : waiters.readers) oss << reader.first.address() << ",";
+            for (auto& reader : waiters.readers) oss << reader.handle.address() << ",";
             oss << "] writer_handles=[";
-            for (auto& writer : waiters.writers) oss << writer.first.address() << ",";
+            for (auto& writer : waiters.writers) oss << writer.handle.address() << ",";
             oss << "]";
             debug_log(oss.str());
         }
 #ifndef _WIN32
         if (revents & (EPOLLIN | EPOLLHUP | EPOLLERR)) {
             for (auto reader = waiters.readers.begin(); reader != waiters.readers.end(); ++reader) {
-                auto& handle = reader->first;
-                auto& owner = reader->second;
+                auto& handle = reader->handle;
+                auto& owner = reader->owner;
                 if (debug_enabled()) {
                     std::ostringstream oss;
                     oss << "[EventLoop] dispatch_fd: reader owner_ptr=" << owner.get() << " handle=" << handle.address();
                     debug_log(oss.str());
                 }
-                if (owner) {
-                    owners_keepalive.push_back(owner);
-                }
-                to_resume.push_back(handle);
+                to_resume.push_back(std::move(*reader));
                 waiters.readers.erase(reader);
                 break;
             }
         }
         if (revents & (EPOLLOUT | EPOLLERR)) {
             for (auto& writer : waiters.writers) {
-                auto& handle = writer.first;
-                auto& owner = writer.second;
+                auto& handle = writer.handle;
+                auto& owner = writer.owner;
                 if (debug_enabled()) {
                     std::ostringstream oss;
                     oss << "[EventLoop] dispatch_fd: writer owner_ptr=" << owner.get() << " handle=" << handle.address();
                     debug_log(oss.str());
                 }
-                if (owner) {
-                    owners_keepalive.push_back(owner);
-                }
-                to_resume.push_back(handle);
+                to_resume.push_back(std::move(writer));
             }
             waiters.writers.clear();
         }
@@ -362,25 +505,19 @@ void EventLoop::dispatch_fd(int fd, uint32_t revents) {
         }
 #else
         for (auto& reader : waiters.readers) {
-            if (reader.second) {
-                owners_keepalive.push_back(reader.second);
-            }
-            to_resume.push_back(reader.first);
+            to_resume.push_back(std::move(reader));
         }
         for (auto& writer : waiters.writers) {
-            if (writer.second) {
-                owners_keepalive.push_back(writer.second);
-            }
-            to_resume.push_back(writer.first);
+            to_resume.push_back(std::move(writer));
         }
         waiters_.erase(it);
 #endif
     }
 
     std::unordered_set<const void*> seen;
-    std::vector<std::coroutine_handle<>> filtered;
-    for (auto handle : to_resume) {
-        const void* address = handle.address();
+    std::vector<FdWaiters::waiter> filtered;
+    for (auto& waiter : to_resume) {
+        const void* address = waiter.handle.address();
         if (seen.find(address) != seen.end()) {
             if (debug_enabled()) {
                 std::ostringstream oss;
@@ -390,19 +527,20 @@ void EventLoop::dispatch_fd(int fd, uint32_t revents) {
             continue;
         }
         seen.insert(address);
-        filtered.push_back(handle);
+        filtered.push_back(std::move(waiter));
     }
     to_resume.swap(filtered);
 
     if (debug_enabled()) {
         std::ostringstream oss;
         oss << "[EventLoop] about to resume " << to_resume.size() << " handles for fd=" << fd << " handles=[";
-        for (auto handle : to_resume) oss << handle.address() << ",";
+        for (auto& waiter : to_resume) oss << waiter.handle.address() << ",";
         oss << "]";
         debug_log(oss.str());
     }
 
-    for (auto handle : to_resume) {
+    for (auto& waiter : to_resume) {
+        auto handle = waiter.handle;
         const void* address = handle.address();
         bool done = false;
         try {
@@ -415,22 +553,13 @@ void EventLoop::dispatch_fd(int fd, uint32_t revents) {
             oss << "[EventLoop] resume-candidate handle=" << address << " done=" << done;
             debug_log(oss.str());
         }
-        if (handle && !done) {
-            try {
-                handle.resume();
-            } catch (...) {
-                if (debug_enabled()) {
-                    std::ostringstream oss;
-                    oss << "[EventLoop] exception while resuming handle=" << address;
-                    debug_log(oss.str());
-                }
-            }
-        }
+        if (handle && !done)
+            resume_waiter(std::move(waiter), IoCompletion::ready);
     }
 }
 
 void EventLoop::finish_all() {
-    std::vector<std::coroutine_handle<>> all;
+    std::vector<FdWaiters::waiter> all;
     {
         std::scoped_lock lock(mtx_);
         for (auto& [fd, waiters] : waiters_) {
@@ -438,44 +567,41 @@ void EventLoop::finish_all() {
                 std::ostringstream oss;
                 oss << "[EventLoop] finish_all fd=" << fd << " readers=" << waiters.readers.size() << " writers=" << waiters.writers.size();
                 oss << " reader_handles=[";
-                for (auto& reader : waiters.readers) oss << reader.first.address() << ",";
+                for (auto& reader : waiters.readers) oss << reader.handle.address() << ",";
                 oss << "] writer_handles=[";
-                for (auto& writer : waiters.writers) oss << writer.first.address() << ",";
+                for (auto& writer : waiters.writers) oss << writer.handle.address() << ",";
                 oss << "]";
                 debug_log(oss.str());
             }
             for (auto& reader : waiters.readers) {
-                auto& handle = reader.first;
-                auto& owner = reader.second;
+                auto& handle = reader.handle;
+                auto& owner = reader.owner;
                 if (debug_enabled()) {
                     std::ostringstream oss;
                     oss << "[EventLoop] finish_all reader handle=" << handle.address() << " owner_ptr=" << owner.get();
                     debug_log(oss.str());
                 }
                 if (handle && !handle.done()) {
-                    all.push_back(handle);
+                    all.push_back(std::move(reader));
                 }
             }
             for (auto& writer : waiters.writers) {
-                auto& handle = writer.first;
-                auto& owner = writer.second;
+                auto& handle = writer.handle;
+                auto& owner = writer.owner;
                 if (debug_enabled()) {
                     std::ostringstream oss;
                     oss << "[EventLoop] finish_all writer handle=" << handle.address() << " owner_ptr=" << owner.get();
                     debug_log(oss.str());
                 }
                 if (handle && !handle.done()) {
-                    all.push_back(handle);
+                    all.push_back(std::move(writer));
                 }
             }
         }
         waiters_.clear();
     }
-    for (auto handle : all) {
-        if (handle && !handle.done()) {
-            handle.resume();
-        }
-    }
+    for (auto& waiter : all)
+        resume_waiter(std::move(waiter), IoCompletion::reactor_shutdown);
 }
 
 void EventLoop::update_epoll_locked(int fd, uint32_t add_flags, std::unique_lock<std::mutex>& lock) {
@@ -500,27 +626,17 @@ void EventLoop::update_epoll_locked(int fd, uint32_t add_flags, std::unique_lock
             }
         }
     } else {
-        std::vector<std::coroutine_handle<>> to_resume;
-        std::vector<std::shared_ptr<void>> owners_keepalive;
+        std::vector<FdWaiters::waiter> to_resume;
         for (auto& reader : waiters.readers) {
-            if (reader.second) {
-                owners_keepalive.push_back(reader.second);
-            }
-            to_resume.push_back(reader.first);
+            to_resume.push_back(std::move(reader));
         }
         for (auto& writer : waiters.writers) {
-            if (writer.second) {
-                owners_keepalive.push_back(writer.second);
-            }
-            to_resume.push_back(writer.first);
+            to_resume.push_back(std::move(writer));
         }
         waiters_.erase(fd);
         lock.unlock();
-        for (auto handle : to_resume) {
-            if (handle && !handle.done()) {
-                handle.resume();
-            }
-        }
+        for (auto& waiter : to_resume)
+            resume_waiter(std::move(waiter), IoCompletion::closed);
         lock.lock();
     }
 #else
